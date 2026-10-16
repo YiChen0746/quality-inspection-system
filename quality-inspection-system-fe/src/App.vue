@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router';
-import { onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { 
   UserFilled, 
   House, 
@@ -33,6 +33,9 @@ const data = reactive({
   isLogin: false,
   isMaster: false,
 })
+
+// 首页为门面展示页：隐藏左侧功能菜单，点击"立即体验"进入内页后再显示
+const isHome = computed(() => data.currentPathName === '/knowledge_promotion')
 
 // 监听路由变化，更新菜单激活状态
 watch(() => route.path, (newPath) => {
@@ -106,7 +109,7 @@ const logoutHandler = async () => {
           </div>
         </el-header>
         <el-container>
-          <el-aside width="160px" >
+          <el-aside width="160px" v-show="!isHome" >
             <el-menu
             :router="true"
             :default-active="data.currentPathName"
@@ -193,6 +196,9 @@ const logoutHandler = async () => {
 
   .el-main{
     padding: 0;
+    /* 明确高度，保证内部 el-scrollbar 总能正确计算滚动区域 */
+    height: calc(100vh - 60px);
+    overflow: hidden;
   }
 
   .header-right{

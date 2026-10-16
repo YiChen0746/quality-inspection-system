@@ -255,7 +255,7 @@ const knowledgeLists = []
           </p>
           <!-- 修改 btn-group 中的“立即体验”按钮 -->
           <div class="btn-group">
-            <router-link to="/contract-review" class="btn btn-primary">立即体验</router-link>
+            <router-link to="/contract-draft" class="btn btn-primary">立即体验</router-link>
           </div>
         </div>
         <img
@@ -311,7 +311,7 @@ const knowledgeLists = []
   <section id="process" class="value-proposition">
     <div class="container3">
       <div class="section-header">
-        <h2 class="section-title">使用流程</h2>
+        <h2 class="section-title">操作指南</h2>
         <p class="section-subtitle">简单四步，完成专业合同审查</p>
       </div>
 
