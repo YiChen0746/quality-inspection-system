@@ -205,6 +205,7 @@
 
 <script>
 import { ElMessage, ElLoading } from 'element-plus';
+import { getAuthHeaders } from '@Setup/storage/user.js';
 
 export default {
   name: 'ContractDraft',
@@ -236,7 +237,7 @@ export default {
     // 加载合同模板
     async loadTemplates() {
       try {
-        const response = await fetch('/api/contract_templates');
+        const response = await fetch('/api/contract_templates', { headers: getAuthHeaders() });
         const data = await response.json();
         if (data.err_code === 0) {
           this.templates = data.data;
@@ -300,7 +301,8 @@ export default {
         const response = await fetch('/api/generate_contract', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
           },
           body: JSON.stringify(this.contractForm)
         });
@@ -342,7 +344,8 @@ export default {
         const response = await fetch('/api/export_contract_docx', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
           },
           body: JSON.stringify({
             contractContent: this.currentContract.contractContent,

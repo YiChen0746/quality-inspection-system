@@ -459,6 +459,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { getAuthHeaders } from '@Setup/storage/user.js';
 import { 
   Document, Upload, UploadFilled, Check, Loading, Clock,
   CircleCheck, Download, Refresh, ArrowDown, ArrowUp, User,
@@ -610,6 +611,7 @@ const processContract = async () => {
     // 发送请求并处理流式响应
     const response = await fetch('/api/contract-review/review', {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData
     });
 
@@ -883,7 +885,8 @@ const exportReport = async () => {
     const response = await fetch('/api/contract-review/export_review_report', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
       },
       body: JSON.stringify(requestBody)
     });
@@ -933,7 +936,7 @@ const testConnection = async () => {
   };
 
   try {
-    const response = await fetch('/api/contract-review/test_connection');
+    const response = await fetch('/api/contract-review/test_connection', { headers: getAuthHeaders() });
     if (response.ok) {
       networkStatus.value = {
         type: 'success',
@@ -998,7 +1001,8 @@ const loadHistoryData = async () => {
     const response = await fetch(`/api/contract-review/history?${params}`, {
       method: 'GET',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
       }
     });
 
@@ -1033,7 +1037,8 @@ const viewHistoryDetail = async (row: any) => {
     const response = await fetch(`/api/contract-review/result/${row.id}`, {
       method: 'GET',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
       }
     });
 
@@ -1079,7 +1084,8 @@ const exportHistoryReport = async (row: any) => {
     const response = await fetch('/api/contract-review/export_review_report', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
       },
       body: JSON.stringify(requestBody)
     });
