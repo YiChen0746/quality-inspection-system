@@ -1,1 +1,25 @@
 @import './base.css';
+
+/* ===== 全局主题变量（统一配色：深蓝主色系，法律/可信任气质） ===== */
+:root {
+  --brand-primary: #1B4B8F;         /* 主色：深蓝 */
+  --brand-primary-dark: #143A73;    /* 主色加深：悬浮/激活态 */
+  --brand-primary-light: #E8F0FA;   /* 主色浅底：图标底色/高亮 */
+  --brand-accent: #4C9AFF;          /* 点缀色：激活边框等 */
+  --brand-text-dark: #1F2D3D;       /* 标题深色 */
+  --brand-text-grey: #5E6D82;       /* 正文灰 */
+  --card-radius: 12px;              /* 卡片统一圆角 */
+  --card-shadow: 0 6px 18px rgba(27, 75, 143, 0.08);        /* 卡片浅阴影 */
+  --card-shadow-hover: 0 14px 32px rgba(27, 75, 143, 0.16); /* 卡片悬浮阴影 */
+}
+
+/* 卡片统一风格：圆角 + 浅阴影 + 悬浮微上浮 */
+.qis-card {
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.qis-card:hover {
+  transform: translateY(-6px);
+  box-shadow: var(--card-shadow-hover);
+}

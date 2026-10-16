@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router';
-import { onMounted, reactive, watch } from 'vue';
+import { onMounted, reactive, ref, watch } from 'vue';
 import { 
   UserFilled, 
   House, 
@@ -15,6 +15,18 @@ import { logout } from '@Setup/request/index.ts';
 
 const router = useRouter()
 const route = useRoute()
+
+// 页面文字大小调节：通过 zoom 缩放主内容区，偏好持久化到 localStorage
+const FONT_SCALE_KEY = 'qis-font-scale'
+const fontScale = ref(1)
+const applyFontScale = (value: number) => {
+  // 限制在 0.85 ~ 1.3 之间，避免缩放过界影响阅读
+  const v = Math.min(1.3, Math.max(0.85, Math.round(value * 100) / 100))
+  fontScale.value = v
+  localStorage.setItem(FONT_SCALE_KEY, String(v))
+}
+const changeFontScale = (delta: number) => applyFontScale(fontScale.value + delta)
+const resetFontScale = () => applyFontScale(1)
 
 const data = reactive({
   currentPathName: '/knowledge_promotion',
@@ -41,6 +53,10 @@ onMounted(async () => {
     data.isMaster = userInfo.nickname === 'master'
   }
   console.log('debug onMounted', data.isMaster)
+
+  // 恢复用户上次设置的文字大小
+  const savedScale = parseFloat(localStorage.getItem(FONT_SCALE_KEY) || '1')
+  applyFontScale(Number.isNaN(savedScale) ? 1 : savedScale)
 })
 
 const goToLogin = () => {
@@ -74,17 +90,25 @@ const logoutHandler = async () => {
       <el-container>
         <el-header height="60px" >
           <!-- <h1 class="main-title">乳腺癌筛查的质检系统</h1> -->
-          <div class="user-info">
-            <!-- <el-avatar :icon="UserFilled" /> -->
-             <img src="./assets/images/tou.png" height="40px;" width="40px">
-            <el-link v-if="!data.isLogin" @click="goToLogin" :underline="false" style="color:white;">登录</el-link>
-            <el-text v-else class="logout" @click="logoutHandler" style="color:white;">退出</el-text>
+          <div class="header-right">
+            <!-- 文字大小调节 -->
+            <div class="font-ctrl">
+              <button class="font-btn" @click="changeFontScale(-0.05)" title="减小字号">A⁻</button>
+              <button class="font-btn font-btn-reset" @click="resetFontScale" title="恢复默认字号">A</button>
+              <button class="font-btn" @click="changeFontScale(0.05)" title="增大字号">A⁺</button>
+            </div>
+            <div class="user-info">
+              <!-- <el-avatar :icon="UserFilled" /> -->
+               <img src="./assets/images/tou.png" height="40px;" width="40px">
+              <el-link v-if="!data.isLogin" @click="goToLogin" :underline="false" style="color:white;">登录</el-link>
+              <el-text v-else class="logout" @click="logoutHandler" style="color:white;">退出</el-text>
+            </div>
           </div>
         </el-header>
         <el-container>
           <el-aside width="160px" >
             <el-menu
-            router="true"
+            :router="true"
             :default-active="data.currentPathName"
             class="el-menu"
             
@@ -122,11 +146,13 @@ const logoutHandler = async () => {
           </el-aside>
           <el-main>
             <el-scrollbar>
-              <router-view v-slot="{ Component }">
-                <keep-alive>
-                  <component :is="Component" />
-                </keep-alive>
-              </router-view>
+              <div class="page-zoom" :style="{ zoom: fontScale }">
+                <router-view v-slot="{ Component }">
+                  <keep-alive>
+                    <component :is="Component" />
+                  </keep-alive>
+                </router-view>
+              </div>
             </el-scrollbar>
           </el-main>
         </el-container>
@@ -169,6 +195,15 @@ const logoutHandler = async () => {
     padding: 0;
   }
 
+  .header-right{
+    position: absolute;
+    right: 40px;
+    top: 0;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
   .user-info{
     height: 60px;
     width: 80px;
@@ -176,9 +211,31 @@ const logoutHandler = async () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    position: absolute;
-    right: 40px;
-    top: 0cap;
+  }
+  .font-ctrl{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .font-btn{
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 14px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  .font-btn:hover{
+    background: rgba(255, 255, 255, 0.32);
+  }
+  .font-btn-reset{
+    font-weight: 700;
+  }
+  .page-zoom{
+    min-height: 100%;
   }
   .main-title{
     margin: 16px 0;
@@ -190,54 +247,39 @@ const logoutHandler = async () => {
   .logout:hover{
     cursor: pointer;
   }
-  /* 侧边栏整体样式 */
+  /* 侧边栏整体样式（统一深蓝主色系） */
 .el-aside {
-  background-color: #003878ff;
-  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+  background-color: var(--brand-primary);
+  box-shadow: 2px 0 8px rgba(14, 43, 87, 0.25);
 }
-.el-menu-item.is-active {
-  background-color: #004266ff !important;
-  color: #fff !important;
-  border-left: 3px solid #40b8e8;
-}
-.el-menu-item:hover:not(.is-disabled) {
-  background-color: #004b66;
-  color: #fff;
-}
-.el-menu-item.is-disabled {
-  color: #888 !important;
-  cursor: not-allowed;
-}
-
-.side-nav {
-  width: 200px;
-  background: #4fc3f7;
-  box-shadow: 2px 0 12px rgba(59,130,246,0.06);
-  border-right: 1.5px solid #e3e8ee;
-  padding-top: 24px;
-  z-index: 2;
+.el-menu {
+  background-color: transparent;
+  border-right: none;
 }
 .el-menu-item {
-  font-size: 17px;
-  color: #17436a;
-  font-weight: 700;
-  padding: 14px 32px;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  padding: 14px 28px;
   border-radius: 8px 0 0 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   cursor: pointer;
-  transition: all 0.22s cubic-bezier(.4,0,.2,1);
-  background: transparent;
+  transition: all 0.22s ease;
   letter-spacing: 1px;
 }
-.el-menu-item:hover, .el-menu-item.is-active {
-  background: linear-gradient(90deg, #b3e0fa 0%, #eaf6fd 100%);
-  color: #2563eb !important;
-  box-shadow: 2px 4px 16px rgba(59,130,246,0.08);
-  transform: translateX(4px) scale(1.035);
+.el-menu-item:hover:not(.is-disabled) {
+  background-color: var(--brand-primary-dark);
+  color: #fff;
 }
 .el-menu-item.is-active {
-  font-weight: 800;
-  border-left: 4px solid #2563eb;
+  background-color: var(--brand-primary-dark) !important;
+  color: #fff !important;
+  border-left: 4px solid var(--brand-accent);
+  font-weight: 700;
+}
+.el-menu-item.is-disabled {
+  color: rgba(255, 255, 255, 0.35) !important;
+  cursor: not-allowed;
 }
 </style>
 
