@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>合同文书智能审核系统 - 登录</title>
+  <!-- 引入Element UI -->
+  <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Microsoft YaHei', Arial, sans-serif;
+      background-color: #ecf0f3;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      width: 1000px;
+      height: 600px;
+      background-color: #ecf0f3;
+      border-radius: 12px;
+      box-shadow: 10px 10px 10px #d1d9e6, -10px -10px 10px #f9f9f9;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+    .left-panel {
+      width: 400px;
+      padding: 50px;
+      background-image: url('/public/img/login2.png');
+      background-size: cover;
+      background-position: center;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .right-panel {
+      width: 600px;
+      padding: 50px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    h1 {
+      font-size: 34px;
+      margin-bottom: 30px;
+      color: #181818;
+      text-align: center;
+    }
+    .form-group {
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    input {
+      width: 100%;
+      height: 40px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background-color: #ecf0f3;
+      box-shadow: inset 2px 2px 4px #d1d9e6, inset -2px -2px 4px #f9f9f9;
+      font-size: 16px;
+      outline: none;
+    }
+    input:focus {
+      box-shadow: inset 4px 4px 4px #d1d9e6, inset -4px -4px 4px #f9f9f9;
+    }
+    button {
+      width: 180px;
+      height: 50px;
+      border-radius: 25px;
+      margin-top: 20px;
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 1.15px;
+      background-color: #4B70E2;
+      color: #f9f9f9;
+      box-shadow: 8px 8px 16px #d1d9e6, -8px -8px 16px #f9f9f9;
+      border: none;
+      outline: none;
+      cursor: pointer;
+    }
+    button:hover {
+      box-shadow: 6px 6px 10px #d1d9e6, -6px -6px 10px #f9f9f9;
+      transform: scale(0.985);
+      transition: 0.25s;
+    }
+    .switch-form {
+      margin-top: 20px;
+      color: #4B70E2;
+      cursor: pointer;
+    }
+    .switch-form:hover {
+      text-decoration: underline;
+    }
+    .description {
+      margin-bottom: 20px;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    /* 添加加载状态的样式 */
+    button.loading {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+    .error-text {
+      color: #F56C6C;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="container">
+      <div class="left-panel">
+        <h2>系统介绍</h2>
+        <p class="description">
+          "合同文书智能审核系统"，一款基于人工智能的法务大模型工具，支持合同审查、起草、纠纷解答等功能，帮助您更快速、更高效地理解和处理各种合同。
+        </p>
+      </div>
+      <div class="right-panel">
+        <div id="login-form" v-if="!isRegisterMode">
+          <h1>登录</h1>
+          <div class="form-group">
+            <input type="email" v-model="loginForm.email" placeholder="邮箱" @blur="validateLoginEmail">
+            <div class="error-text" v-if="loginErrors.email">{{ loginErrors.email }}</div>
+          </div>
+          <div class="form-group">
+            <input type="password" v-model="loginForm.password" placeholder="密码" @blur="validateLoginPassword">
+            <div class="error-text" v-if="loginErrors.password">{{ loginErrors.password }}</div>
+          </div>
+          <button @click="handleLogin" :class="{ loading: loginLoading }" :disabled="loginLoading">
+            {{ loginLoading ? '登录中...' : '登录' }}
+          </button>
+          <div class="switch-form" @click="switchToRegister">没有账号？点击注册</div>
+        </div>
+        
+        <div id="register-form" v-if="isRegisterMode">
+          <h1>注册</h1>
+          <div class="form-group">
+            <input type="email" v-model="registerForm.email" placeholder="邮箱" @blur="validateRegisterEmail">
+            <div class="error-text" v-if="registerErrors.email">{{ registerErrors.email }}</div>
+          </div>
+          <div class="form-group">
+            <input type="text" v-model="registerForm.nickname" placeholder="单位昵称" @blur="validateRegisterNickname">
+            <div class="error-text" v-if="registerErrors.nickname">{{ registerErrors.nickname }}</div>
+          </div>
+          <div class="form-group">
+            <input type="password" v-model="registerForm.password" placeholder="密码" @blur="validateRegisterPassword">
+            <div class="error-text" v-if="registerErrors.password">{{ registerErrors.password }}</div>
+          </div>
+          <button @click="handleRegister" :class="{ loading: registerLoading }" :disabled="registerLoading">
+            {{ registerLoading ? '注册中...' : '注册' }}
+          </button>
+          <div class="switch-form" @click="switchToLogin">已有账号？点击登录</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 引入Vue和Element UI -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+  <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+  <script>
+    new Vue({
+      el: '#app',
+      data() {
+        return {
+          isRegisterMode: false,
+          loginForm: {
+            email: '',
+            password: ''
+          },
+          registerForm: {
+            email: '',
+            nickname: '',
+            password: ''
+          },
+          loginErrors: {
+            email: '',
+            password: ''
+          },
+          registerErrors: {
+            email: '',
+            nickname: '',
+            password: ''
+          },
+          loginLoading: false,
+          registerLoading: false
+        };
+      },
+      methods: {
+        // 表单验证方法
+        validateLoginEmail() {
+          if (!this.loginForm.email) {
+            this.loginErrors.email = '请输入邮箱地址';
+            return false;
+          } else if (!/^[\w-]+(\.[\w-]+)*@[\w-]+(\.[\w-]+)+$/.test(this.loginForm.email)) {
+            this.loginErrors.email = '请输入有效的邮箱地址';
+            return false;
+          } else {
+            this.loginErrors.email = '';
+            return true;
+          }
+        },
+        validateLoginPassword() {
+          if (!this.loginForm.password) {
+            this.loginErrors.password = '请输入密码';
+            return false;
+          } else {
+            this.loginErrors.password = '';
+            return true;
+          }
+        },
+        validateRegisterEmail() {
+          if (!this.registerForm.email) {
+            this.registerErrors.email = '请输入邮箱地址';
+            return false;
+          } else if (!/^[\w-]+(\.[\w-]+)*@[\w-]+(\.[\w-]+)+$/.test(this.registerForm.email)) {
+            this.registerErrors.email = '请输入有效的邮箱地址';
+            return false;
+          } else {
+            this.registerErrors.email = '';
+            return true;
+          }
+        },
+        validateRegisterNickname() {
+          if (!this.registerForm.nickname) {
+            this.registerErrors.nickname = '请输入单位昵称';
+            return false;
+          } else if (this.registerForm.nickname.length < 2) {
+            this.registerErrors.nickname = '昵称至少需要2个字符';
+            return false;
+          } else {
+            this.registerErrors.nickname = '';
+            return true;
+          }
+        },
+        validateRegisterPassword() {
+          if (!this.registerForm.password) {
+            this.registerErrors.password = '请输入密码';
+            return false;
+          } else if (this.registerForm.password.length < 6) {
+            this.registerErrors.password = '密码至少需要6个字符';
+            return false;
+          } else {
+            this.registerErrors.password = '';
+            return true;
+          }
+        },
+        // 切换表单
+        switchToRegister() {
+          this.isRegisterMode = true;
+        },
+        switchToLogin() {
+          this.isRegisterMode = false;
+        },
+        // 登录处理
+        handleLogin() {
+          // 验证表单
+          const isEmailValid = this.validateLoginEmail();
+          const isPasswordValid = this.validateLoginPassword();
+          
+          if (!isEmailValid || !isPasswordValid) {
+            return;
+          }
+          
+          this.loginLoading = true;
+          
+          fetch('/api/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              email: this.loginForm.email,
+              password: this.loginForm.password
+            })
+          })
+          .then(response => response.json())
+          .then(data => {
+            this.loginLoading = false;
+            
+            if (data.err_code === 0) {
+              this.$message.success('登录成功，即将跳转到主页');
+              setTimeout(() => {
+                window.location.href = '/';
+              }, 1500);
+            } else if (data.err_code === 1) {
+              this.$message.error('邮箱或密码错误');
+            } else if (data.err_code === 2) {
+              this.$message.warning('邮箱未验证，请先验证邮箱');
+            } else if (data.err_code === 500) {
+              this.$message.error('服务器忙，请稍后重试');
+            } else {
+              this.$message.error(data.message || '登录失败');
+            }
+          })
+          .catch(error => {
+            this.loginLoading = false;
+            console.error('登录请求失败:', error);
+            this.$message.error('网络错误，请稍后重试');
+          });
+        },
+        // 注册处理
+        handleRegister() {
+          // 验证表单
+          const isEmailValid = this.validateRegisterEmail();
+          const isNicknameValid = this.validateRegisterNickname();
+          const isPasswordValid = this.validateRegisterPassword();
+          
+          if (!isEmailValid || !isNicknameValid || !isPasswordValid) {
+            return;
+          }
+          
+          this.registerLoading = true;
+          
+          fetch('/api/register', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              email: this.registerForm.email,
+              nickname: this.registerForm.nickname,
+              password: this.registerForm.password
+            })
+          })
+          .then(response => response.json())
+          .then(data => {
+            this.registerLoading = false;
+            
+            if (data.err_code === 0) {
+              this.$message.success('注册成功，请前往邮箱验证');
+              setTimeout(() => {
+                window.location.href = `/api/email?email=${data.message}`;
+              }, 1500);
+            } else if (data.err_code === 1) {
+              this.$message.error('邮箱已注册');
+            } else if (data.err_code === 400) {
+              if (data.message.includes('密码')) {
+                this.registerErrors.password = data.message;
+              } else if (data.message.includes('邮箱')) {
+                this.registerErrors.email = data.message;
+              } else if (data.message.includes('昵称')) {
+                this.registerErrors.nickname = data.message;
+              } else {
+                this.$message.error(data.message);
+              }
+            } else if (data.err_code === 500) {
+              this.$message.error('服务器忙，请稍后重试');
+            } else {
+              this.$message.error(data.message || '注册失败');
+            }
+          })
+          .catch(error => {
+            this.registerLoading = false;
+            console.error('注册请求失败:', error);
+            this.$message.error('网络错误，请稍后重试');
+          });
+        }
+      }
+    });
+  </script>
+</body>
+</html> 

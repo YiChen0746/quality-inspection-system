@@ -1,0 +1,376 @@
+:root {
+  --primary: #5628EE;
+  --success: #0EAC70;
+  --grey-light: #99A3BA;
+  --grey: #6C7486;
+  --grey-dark: #3F4656;
+  --light: #CDD9ED;
+  --lighter: #E4ECFA;
+  --lightest: #EEF4FF;
+  --pale: #F5F9FF;
+  --shadow: rgba(18, 22, 33, .05);
+}
+
+.upload {
+  --percent: 0;
+  counter-increment: percent var(--percent);
+  background: #fff;
+  border-radius: 8px;
+  width: 320px;
+  box-shadow: 0 4px 16px -1px var(--shadow);
+  display: flex;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  padding: 32px 20px;
+  font-family: Roboto, Arial;
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
+}
+.upload .percent {
+  background: var(--pale);
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  transform-origin: 0 50%;
+  overflow: hidden;
+  transition: background 0.6s ease, transform 0.16s ease;
+  transform: scaleX(calc(var(--percent) / 100));
+}
+.upload .percent span {
+  display: block;
+  position: absolute;
+  right: 0;
+  width: 100%;
+  bottom: 19px;
+  height: 2px;
+  opacity: 0;
+  transform: translateY(0.5px);
+  transition: transform 0.8s ease;
+}
+.upload .percent span:before, .upload .percent span:after {
+  --r: 0;
+  --s: .5;
+  content: "";
+  position: absolute;
+  top: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--primary);
+  transition: background 0.8s ease, transform 0.8s ease, height 0.3s ease;
+  transform: rotate(var(--r)) scaleY(var(--s));
+}
+.upload .percent span:before {
+  right: 0;
+  width: 64%;
+  transform-origin: 0 50%;
+}
+.upload .percent span:after {
+  left: 0;
+  width: 38%;
+  transform-origin: 100% 50%;
+}
+.upload .percent div {
+  --x: 0;
+  transform: translateX(var(--x));
+  transition: transform 1s ease;
+  position: absolute;
+  left: 0;
+  bottom: 8px;
+  width: 300%;
+}
+.upload .percent svg {
+  display: block;
+  height: 12px;
+  width: 100%;
+  stroke-width: 1.2px;
+  color: var(--primary);
+  transition: color 0.5s ease;
+}
+.upload.paused:not(.finished) .percent div {
+  --x: -66.66%;
+}
+.upload.paused:not(.finished) .percent div svg {
+  color: var(--light);
+  -webkit-animation: down 0.8s linear forwards;
+          animation: down 0.8s linear forwards;
+}
+.upload.paused:not(.finished) .text > div div small:first-child {
+  opacity: 0;
+}
+.upload.paused:not(.finished) .text > div div small:last-child {
+  opacity: 1;
+  transition-delay: 0.4s;
+}
+.upload.finished .percent {
+  background: #fff;
+}
+.upload.finished .percent span {
+  opacity: 1;
+  transform: translate(-20px, -19px);
+}
+.upload.finished .percent span:before, .upload.finished .percent span:after {
+  --s: 1;
+  background: var(--grey-light);
+  transition: background 0.6s ease, transform 0.6s ease 0.45s;
+  -webkit-animation: check 0.4s linear forwards 0.6s;
+          animation: check 0.4s linear forwards 0.6s;
+}
+.upload.finished .percent span:before {
+  --r: -50deg;
+}
+.upload.finished .percent span:after {
+  --r: 38deg;
+}
+.upload.finished .percent svg {
+  opacity: 0;
+}
+.upload.finished .text {
+  --y: 0;
+}
+.upload.finished .text > div {
+  opacity: 0;
+}
+.upload.finished nav {
+  opacity: 0;
+  pointer-events: none;
+}
+.upload .text {
+  --y: -18px;
+  position: relative;
+  z-index: 1;
+  transform: translateY(var(--y));
+  transition: transform 0.6s ease;
+}
+.upload .text strong {
+  font-weight: 400;
+  font-size: 14px;
+  display: block;
+  color: var(--grey-dark);
+}
+.upload .text > div {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  transform: translateY(6px);
+  line-height: 20px;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.4s ease;
+}
+.upload .text > div small {
+  white-space: nowrap;
+  vertical-align: top;
+  display: block;
+  font-size: 12px;
+  color: var(--grey-light);
+}
+.upload .text > div > small {
+  width: 30px;
+  text-align: center;
+}
+.upload .text > div > small:before {
+  content: counter(percent);
+}
+.upload .text > div div {
+  vertical-align: top;
+  display: inline-block;
+  position: relative;
+  margin-left: 4px;
+}
+.upload .text > div div:before {
+  content: "";
+  width: 2px;
+  height: 2px;
+  display: block;
+  border-radius: 50%;
+  background: var(--grey-light);
+  display: inline-block;
+  vertical-align: top;
+  margin-top: 9px;
+}
+.upload .text > div div small {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  transition: opacity 0.3s ease;
+}
+.upload .text > div div small:first-child {
+  transition-delay: 0.4s;
+}
+.upload .text > div div small:last-child {
+  opacity: 0;
+}
+.upload nav {
+  z-index: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  transition: opacity 0.4s ease;
+}
+.upload nav ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+}
+.upload nav ul:not(:last-child) {
+  margin-right: 16px;
+}
+.upload nav ul:first-child {
+  --y: 8px;
+  opacity: 0;
+  transform: translateY(var(--y));
+  transition: opacity 0.3s ease, transform 0.4s ease;
+}
+.upload nav ul li:not(:last-child) {
+  margin-right: 12px;
+}
+.upload nav ul li a {
+  --r: 0deg;
+  --s: 1.01;
+  display: block;
+  transform: rotate(var(--r)) scale(var(--s)) translateZ(0);
+  transition: transform 0.6s ease, background 0.4s ease;
+}
+.upload nav ul li a svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  color: var(--grey-light);
+}
+.upload nav ul li a:active {
+  --s: .84;
+  transition: transform 0.3s ease, background 0.4s ease;
+}
+.upload nav ul li a.dots {
+  --r: 90deg;
+}
+.upload nav ul li a.btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  position: relative;
+  background: var(--lightest);
+}
+.upload nav ul li a.btn svg {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+}
+.upload nav ul li a.btn:hover {
+  background: var(--lighter);
+}
+.upload nav ul li a.btn.play {
+  --r: 90deg;
+}
+.upload nav ul li a.btn.play svg:last-child {
+  transform: scale(-1) translateZ(0);
+}
+.upload nav ul li a.btn.play.active {
+  --r: 0;
+}
+.upload nav ul li a.btn.cancel:before, .upload nav ul li a.btn.cancel:after {
+  --r: -45deg;
+  content: "";
+  display: block;
+  width: 2px;
+  border-radius: 1px;
+  height: 14px;
+  background: var(--grey-light);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: -7px 0 0 -1px;
+  transform: rotate(var(--r)) scale(0.9) translateZ(0);
+}
+.upload nav ul li a.btn.cancel:after {
+  --r: 45deg;
+}
+.upload.isMobile nav ul:first-child, .upload:hover nav ul:first-child {
+  --y: 0;
+  opacity: 1;
+}
+
+@-webkit-keyframes down {
+  40% {
+    transform: translateY(2px);
+  }
+}
+
+@keyframes down {
+  40% {
+    transform: translateY(2px);
+  }
+}
+@-webkit-keyframes check {
+  100% {
+    background: var(--success);
+  }
+}
+@keyframes check {
+  100% {
+    background: var(--success);
+  }
+}
+.upload.finished + .restart {
+  opacity: 1;
+  visibility: visible;
+}
+
+.restart {
+  position: absolute;
+  bottom: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--grey-light);
+  font-size: 14px;
+  line-height: 16px;
+  text-decoration: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.4s ease;
+}
+.restart svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  display: inline-block;
+  vertical-align: top;
+}
+
+html {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: inherit;
+}
+*:before, *:after {
+  box-sizing: inherit;
+}
+
+body {
+  min-height: 100vh;
+  font-family: Roboto, Arial;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--light);
+  padding: 20px;
+}
+body .dribbble {
+  position: fixed;
+  display: block;
+  right: 20px;
+  bottom: 20px;
+}
+body .dribbble img {
+  display: block;
+  height: 28px;
+}
