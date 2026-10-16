@@ -160,7 +160,7 @@
                 <button @click="regenerateContract" class="btn-icon" title="重新生成">
                   <i class="icon-refresh">🔄</i>
                 </button>
-                <button @click="exportDocx" class="btn-icon" title="导出DOCX">
+                <button @click="showExportDialog" class="btn-icon" title="导出合同">
                   <i class="icon-download">📥</i>
                 </button>
               </div>
@@ -201,6 +201,45 @@
       </div>
     </div>
   </div>
+
+  <!-- 导出格式选择对话框 -->
+  <el-dialog
+    v-model="exportDialogVisible"
+    title="导出合同"
+    width="360px"
+    :close-on-click-modal="true"
+  >
+    <div class="export-format-options">
+      <div
+        class="export-option"
+        :class="{ active: exportFormat === 'docx' }"
+        @click="exportFormat = 'docx'"
+      >
+        <div class="export-icon">📄</div>
+        <div class="export-text">
+          <div class="export-title">Word 文档 (.docx)</div>
+          <div class="export-desc">适合编辑修改</div>
+        </div>
+      </div>
+      <div
+        class="export-option"
+        :class="{ active: exportFormat === 'pdf' }"
+        @click="exportFormat = 'pdf'"
+      >
+        <div class="export-icon">📕</div>
+        <div class="export-text">
+          <div class="export-title">PDF 文件 (.pdf)</div>
+          <div class="export-desc">适合打印分享</div>
+        </div>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="exportDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="isExporting" @click="handleExport">
+        确认导出
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script>
@@ -226,7 +265,10 @@ export default {
       },
       errors: {},
       currentContract: null,
-      contractHistory: []
+      contractHistory: [],
+      exportDialogVisible: false,
+      exportFormat: 'docx',
+      isExporting: false
     };
   },
   mounted() {
@@ -333,15 +375,27 @@ export default {
       await this.generateContract();
     },
 
-    // 导出DOCX
-    async exportDocx() {
+    // 显示导出格式选择对话框
+    showExportDialog() {
       if (!this.currentContract) {
         ElMessage.warning('请先生成合同内容');
         return;
       }
+      this.exportFormat = 'docx';
+      this.exportDialogVisible = true;
+    },
+
+    // 执行导出（根据选择的格式调用对应接口）
+    async handleExport() {
+      if (!this.currentContract) return;
+
+      this.isExporting = true;
+      const isPdf = this.exportFormat === 'pdf';
+      const apiUrl = isPdf ? '/api/export_contract_pdf' : '/api/export_contract_docx';
+      const fileExt = isPdf ? 'pdf' : 'docx';
 
       try {
-        const response = await fetch('/api/export_contract_docx', {
+        const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -358,18 +412,27 @@ export default {
           const url = window.URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
-          link.download = `${this.currentContract.contractInfo?.contractName || '合同'}.docx`;
+          link.download = `${this.currentContract.contractInfo?.contractName || '合同'}.${fileExt}`;
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
           window.URL.revokeObjectURL(url);
-          ElMessage.success('合同导出成功！');
+          ElMessage.success(`导出${isPdf ? 'PDF' : 'Word'}成功！`);
+          this.exportDialogVisible = false;
         } else {
-          ElMessage.error('导出失败，请稍后重试');
+          // 尝试解析后端返回的错误信息
+          try {
+            const errData = await response.json();
+            ElMessage.error(errData.message || '导出失败，请稍后重试');
+          } catch {
+            ElMessage.error('导出失败，请稍后重试');
+          }
         }
       } catch (error) {
         console.error('导出失败:', error);
         ElMessage.error('导出失败，请稍后重试');
+      } finally {
+        this.isExporting = false;
       }
     },
 
@@ -430,6 +493,54 @@ export default {
 </script>
 
 <style scoped>
+.export-format-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 2px solid #e4e7ed;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.export-option:hover {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.export-option.active {
+  border-color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.export-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.export-text {
+  flex: 1;
+}
+
+.export-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 2px;
+}
+
+.export-desc {
+  font-size: 12px;
+  color: #909399;
+}
+
 .contract-draft-container {
   min-height: 100vh;
   background-color: #f5f7fa;

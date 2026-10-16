@@ -102,6 +102,7 @@ router.use('/contract-review', contractReviewAPI);
 // 合同起草相关路由
 router.post('/generate_contract', contractDraftAPI.generateContract);
 router.post('/export_contract_docx', contractDraftAPI.exportContractDocx);
+router.post('/export_contract_pdf', contractDraftAPI.exportContractPdf);
 router.get('/contract_templates', contractDraftAPI.getContractTemplates);
 
 module.exports = router;

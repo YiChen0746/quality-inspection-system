@@ -1,8 +1,29 @@
 const express = require('express');
 const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
+const PDFDocument = require('pdfkit');
 const axios = require('axios');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const{ Contract } = require('../models');
+
+// 查找可用的中文字体（优先 .ttf 格式，确保 PDF 中文正常显示）
+function findChineseFont() {
+  const candidates = [
+    'C:/Windows/Fonts/simhei.ttf',     // 黑体（TTF，兼容性最好）
+    'C:/Windows/Fonts/simsunb.ttf',    // 宋体（TTF）
+    'C:/Windows/Fonts/simfang.ttf',    // 仿宋（TTF）
+    'C:/Windows/Fonts/simkai.ttf',     // 楷体（TTF）
+    'C:/Windows/Fonts/msyh.ttc',       // 微软雅黑（TTC，备选）
+    'C:/Windows/Fonts/simsun.ttc',     // 宋体（TTC，备选）
+    '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+    '/System/Library/Fonts/PingFang.ttc',
+  ];
+  for (const f of candidates) {
+    if (fs.existsSync(f)) return f;
+  }
+  return null;
+}
 
 // 合同起草API
 const generateContract = async (req, res) => {
@@ -258,6 +279,94 @@ const exportContractDocx = async (req, res) => {
   }
 };
 
+// 导出PDF格式合同
+const exportContractPdf = async (req, res) => {
+  let doc = null;
+  try {
+    const { contractContent, contractName } = req.body;
+
+    if (!contractContent) {
+      return res.status(400).json({
+        err_code: 400,
+        message: '合同内容不能为空'
+      });
+    }
+
+    const fontPath = findChineseFont();
+    if (!fontPath) {
+      return res.status(500).json({
+        err_code: 500,
+        message: '服务器未找到可用的中文字体，无法生成 PDF'
+      });
+    }
+
+    const lines = contractContent.split('\n').filter(line => line.trim());
+
+    doc = new PDFDocument({ size: 'A4', margin: 60, bufferPages: true });
+
+    // 注册中文字体（放在 pipe 之前，确保字体加载失败时还能返回 JSON 错误）
+    try {
+      doc.registerFont('chinese', fontPath);
+    } catch (fontErr) {
+      console.error('字体加载失败:', fontErr.message);
+      return res.status(500).json({
+        err_code: 500,
+        message: '字体加载失败，无法生成 PDF'
+      });
+    }
+    doc.font('chinese');
+
+    // 设置响应头并建立管道
+    const fileName = `${contractName || '合同文档'}_${new Date().toISOString().slice(0, 10)}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    doc.pipe(res);
+
+    // 文档标题
+    doc.fontSize(18).text(contractName || '合同文档', { align: 'center' });
+    doc.moveDown(1);
+
+    // 合同内容
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const isMajorTitle = /^[一二三四五六七八九十]+、/.test(trimmed);
+      const isMinorTitle = /^\d+\./.test(trimmed);
+
+      if (isMajorTitle) {
+        doc.moveDown(0.5);
+        doc.fontSize(14).text(trimmed);
+        doc.moveDown(0.3);
+      } else if (isMinorTitle) {
+        doc.fontSize(12).text(trimmed);
+      } else {
+        doc.fontSize(11).text(trimmed, { lineGap: 3 });
+      }
+    }
+
+    // 签署区域
+    doc.moveDown(2);
+    doc.fontSize(11).text('甲方签字：_________________    日期：_________________');
+    doc.moveDown(1);
+    doc.fontSize(11).text('乙方签字：_________________    日期：_________________');
+
+    doc.end();
+
+  } catch (error) {
+    console.error('导出PDF失败:', error);
+    if (doc) {
+      try { doc.end(); } catch (e) { /* ignore */ }
+    }
+    if (!res.headersSent) {
+      return res.status(500).json({
+        err_code: 500,
+        message: '导出失败，请稍后重试'
+      });
+    }
+  }
+};
+
 // 获取合同模板列表
 const getContractTemplates = async (req, res) => {
   try {
@@ -316,5 +425,6 @@ const getContractTemplates = async (req, res) => {
 module.exports = {
   generateContract,
   exportContractDocx,
+  exportContractPdf,
   getContractTemplates
 };
