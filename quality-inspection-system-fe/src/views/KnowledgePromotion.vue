@@ -267,50 +267,6 @@ const knowledgeLists = []
     </section>
   </div>
 
-  <!-- 功能导航：点击卡片直达对应功能页 -->
-  <section class="nav-section">
-    <div class="container2">
-      <div class="section-header">
-        <h2 class="section-title">功能导航</h2>
-        <p class="section-subtitle">四大核心能力，覆盖合同全生命周期</p>
-      </div>
-      <div class="nav-grid">
-        <router-link to="/contract-draft" class="nav-card">
-          <div class="nav-icon">
-            <el-icon><EditPen /></el-icon>
-          </div>
-          <h3>合同起草</h3>
-          <p>AI 智能生成合同初稿，省时省力</p>
-          <span class="nav-arrow">立即进入 →</span>
-        </router-link>
-        <router-link to="/result_analysis" class="nav-card">
-          <div class="nav-icon">
-            <el-icon><DataAnalysis /></el-icon>
-          </div>
-          <h3>合同分析</h3>
-          <p>多维度统计合同数据，洞察风险分布</p>
-          <span class="nav-arrow">立即进入 →</span>
-        </router-link>
-        <router-link to="/intelligent_Q_A" class="nav-card">
-          <div class="nav-icon">
-            <el-icon><ChatDotRound /></el-icon>
-          </div>
-          <h3>法务助手</h3>
-          <p>随时提问，AI 法务顾问在线解答</p>
-          <span class="nav-arrow">立即进入 →</span>
-        </router-link>
-        <router-link to="/contract-review" class="nav-card">
-          <div class="nav-icon">
-            <el-icon><View /></el-icon>
-          </div>
-          <h3>合同审查</h3>
-          <p>上传合同文件，快速识别风险条款</p>
-          <span class="nav-arrow">立即进入 →</span>
-        </router-link>
-      </div>
-    </div>
-  </section>
-
   <!-- 特点区域 -->
   <section class="features">
     <div class="container2">
@@ -625,73 +581,6 @@ const knowledgeLists = []
   color: var(--brand-text-grey);
   font-size: 1rem;
   line-height: 1.7;
-}
-
-/* 功能导航卡片 */
-.nav-section {
-  padding: 30px 0;
-  background-color: #f7fafd;
-}
-
-.nav-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 30px;
-}
-
-.nav-card {
-  display: block;
-  background: #fff;
-  border-radius: var(--card-radius);
-  padding: 32px 24px;
-  text-align: center;
-  box-shadow: var(--card-shadow);
-  border: 1px solid #eef2f7;
-  text-decoration: none;
-  color: inherit;
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
-}
-
-.nav-card:hover {
-  transform: translateY(-6px);
-  box-shadow: var(--card-shadow-hover);
-  border-color: var(--brand-primary);
-}
-
-.nav-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  background: var(--brand-primary-light);
-  color: var(--brand-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-  margin: 0 auto 18px;
-}
-
-.nav-card h3 {
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: var(--brand-text-dark);
-  margin-bottom: 10px;
-}
-
-.nav-card p {
-  color: var(--brand-text-grey);
-  font-size: 0.95rem;
-  line-height: 1.6;
-  margin-bottom: 14px;
-}
-
-.nav-arrow {
-  color: var(--brand-primary);
-  font-weight: 600;
-  font-size: 0.95rem;
 }
 
 </style>
