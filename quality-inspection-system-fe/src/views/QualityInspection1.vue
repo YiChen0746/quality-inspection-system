@@ -61,7 +61,7 @@ export default {
   },
   methods: {
     getContracts() {
-      axios.get('http://127.0.0.1:3000/api/getContracts')
+      axios.get('/api/getContracts')
         .then(response => {
           const files = response.data.files;
           if (Array.isArray(files)) {
@@ -94,7 +94,7 @@ export default {
         const formData = new FormData();
         formData.append("file", file);
 
-        axios.post('http://127.0.0.1:3000/api/upload1', formData, {
+        axios.post('/api/upload1', formData, {
           headers: {
             "Content-Type": "multipart/form-data",
             "Access-Control-Allow-Origin": "*",
@@ -129,7 +129,7 @@ export default {
         return;
       }
 
-      axios.delete(`http://127.0.0.1:3000/api/deleteContract`, {
+      axios.delete(`/api/deleteContract`, {
         headers: {
           'Content-Type': 'application/json'
         },

@@ -8,9 +8,15 @@ const contractDraftAPI = require('./contract-draft');
 const uploadAPI = require('./upload');
 const filesAPI = require('./files');
 const contractReviewAPI = require('./contract-review');
+const deepseekProxyAPI = require('./deepseek-proxy');
+const auth = require('../middleware/auth');
 const multer = require('multer');
 
 const router = express.Router();
+
+// ================================================================
+// 白名单路由：无需登录即可访问（注册、登录、邮箱验证、修改密码）
+// ================================================================
 
 // ================= 注册 - 验证 - 登录 - 退出 ================
 // 渲染注册登录页面
@@ -33,6 +39,11 @@ router.post('/changePasswordByCode', emailAPI.changePasswordByCode);
 
 // 渲染通过邮箱验证码修改密码页面
 router.get('/changePasswordByCode', registerAPI.renderChangePasswordPage);
+
+// ================================================================
+// 以下所有接口均需登录（携带 Authorization: Bearer <token>）
+// ================================================================
+router.use(auth);
 
 // ================= 质量检查 ================
 // 单个病历质检
@@ -63,6 +74,9 @@ router.get('/hospital_list', qualityAPI.getHospitalList);
 
 // ================= 智能问答 ================
 router.post('/intelligent_qa', chatAPI.getChatAnswer);
+
+// ================= 大模型代理（密钥仅存于服务端） ================
+router.use('/deepseek', deepseekProxyAPI);
 
 // ================= 文件上传和管理 ================
 // 上传文件

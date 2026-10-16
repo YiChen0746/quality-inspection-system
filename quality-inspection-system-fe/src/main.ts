@@ -1,5 +1,8 @@
 import '@/assets/css/index.css'
 
+// 全局 axios 拦截器：自动携带登录 token、401 自动跳登录页（需在最早入口加载）
+import '@/setup/request/auth-interceptor'
+
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'

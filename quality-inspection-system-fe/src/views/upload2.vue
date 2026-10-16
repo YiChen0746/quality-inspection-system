@@ -140,7 +140,7 @@ export default {
       }
 
       axios
-        .delete(`http://127.0.0.1:3000/api/delete`, {
+        .delete(`/api/delete`, {
           headers: {
             "Content-Type": "application/json",
           },
@@ -157,7 +157,7 @@ export default {
         });
     },
     goBack() {
-      window.location.href = "http://localhost:5173/upload";
+      window.location.href = "/upload";
     },
     handleClick() {
       this.$refs.fileInput.click();
@@ -172,7 +172,7 @@ export default {
     },
     fetchFiles() {
       axios
-        .get("http://127.0.0.1:3000/api/files")
+        .get("/api/files")
         .then((response) => {
           this.files = response.data.files;
         })
@@ -197,7 +197,7 @@ export default {
       formData.append("file", file);
       console.log("开始post请求");
       axios
-        .post("http://localhost:3000/api/upload", formData, {
+        .post("/api/upload", formData, {
           headers: {
             // "Content-Type": "multipart/form-data",
             "Access-Control-Allow-Origin": "*",
@@ -266,7 +266,7 @@ export default {
       // formData.append("content", editorContent);
 
       // axios
-      //   .post("http://127.0.0.1:3000/api/baocun", formData, {
+      //   .post("/api/baocun", formData, {
       //     headers: {
       //       "Content-Type": "multipart/form-data",
       //     },

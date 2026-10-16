@@ -4,14 +4,8 @@ const md5 = require('blueimp-md5');
 const path = require('path');
 const fs = require('fs');
 
-// 数据库配置
-const dbConfig = {
-  host: 'localhost',
-  user: 'root',
-  password: '070404',
-  port: 3306,
-  database: 'quality_inspection'
-};
+// 数据库配置统一从 config/db.js 读取（支持 .env 环境变量），避免两处配置不同步
+const { dbConfig } = require('../config/db');
 
 // 创建数据库的函数
 async function createDatabase() {

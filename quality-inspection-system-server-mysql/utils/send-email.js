@@ -1,14 +1,14 @@
 const nodemailer = require('nodemailer');
 
-// 配置邮件发送器
+// 配置邮件发送器：SMTP 参数优先读取环境变量，未配置时回退到原有默认值
 const transporter = nodemailer.createTransport({
-  service: 'qq', // 使用QQ邮箱服务
-  host: 'smtp.qq.com', 
-  port: 465,
+  service: process.env.SMTP_SERVICE || 'qq', // 使用QQ邮箱服务
+  host: process.env.SMTP_HOST || 'smtp.qq.com', 
+  port: Number(process.env.SMTP_PORT) || 465,
   secure: true, // true for 465, false for other ports
   auth: {
-    user: '2238622408@qq.com', // QQ邮箱账号
-    pass: 'tpahlfbjbadfdhhf' // QQ邮箱SMTP授权码
+    user: process.env.SMTP_USER || '2238622408@qq.com', // QQ邮箱账号
+    pass: process.env.SMTP_PASS || 'tpahlfbjbadfdhhf' // QQ邮箱SMTP授权码
   }
 });
 

@@ -87,7 +87,7 @@ const sendVerificationCode = () => {
   
   sendLoading.value = true;
   
-  axios.post('http://127.0.0.1:3000/api/sendCode', { email: email.value })
+  axios.post('/api/sendCode', { email: email.value })
     .then(response => {
       sendLoading.value = false;
       
@@ -119,7 +119,7 @@ const verifyCode = () => {
   
   verifyLoading.value = true;
   
-  axios.post('http://127.0.0.1:3000/api/sureCode', {
+  axios.post('/api/sureCode', {
     email: email.value,
     code: code.value
   })

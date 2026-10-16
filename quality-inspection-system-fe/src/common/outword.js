@@ -159,7 +159,7 @@ export const ExportBriefDataDocx = (tempDocxPath, data) => {
             // 保存并上传文件
             const formData = new FormData();
             formData.append('file', out, fixedFileName);
-            return axios.post("http://localhost:3000/api/saveDocx", formData);
+            return axios.post("/api/saveDocx", formData);
         })
         .then(response => {
             console.log("文件保存成功", response.data);

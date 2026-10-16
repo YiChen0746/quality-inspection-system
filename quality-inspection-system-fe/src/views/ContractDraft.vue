@@ -236,7 +236,7 @@ export default {
     // 加载合同模板
     async loadTemplates() {
       try {
-        const response = await fetch('http://127.0.0.1:3000/api/contract_templates');
+        const response = await fetch('/api/contract_templates');
         const data = await response.json();
         if (data.err_code === 0) {
           this.templates = data.data;
@@ -297,7 +297,7 @@ export default {
       });
 
       try {
-        const response = await fetch('http://127.0.0.1:3000/api/generate_contract', {
+        const response = await fetch('/api/generate_contract', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -339,7 +339,7 @@ export default {
       }
 
       try {
-        const response = await fetch('http://127.0.0.1:3000/api/export_contract_docx', {
+        const response = await fetch('/api/export_contract_docx', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

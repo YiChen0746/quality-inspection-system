@@ -101,7 +101,7 @@
     methods: {
       
       fetchFiles() {
-      axios.get('http://127.0.0.1:3000/api/files')
+      axios.get('/api/files')
         .then(response => {
           this.files = response.data.files;
         })

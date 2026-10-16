@@ -61,7 +61,7 @@ export default {
       try {
         ElMessage.info('正在获取统计数据...');
         
-        const response = await fetch('http://127.0.0.1:3000/api/contract_statistics?days=30', {
+        const response = await fetch('/api/contract_statistics?days=30', {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json'

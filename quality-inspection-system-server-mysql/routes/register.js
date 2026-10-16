@@ -3,6 +3,7 @@ const md5 = require('blueimp-md5');
 const Joi = require('joi');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/jwt');
 const { User, Registering } = require('../models');
 
 // 创建路由对象
@@ -160,8 +161,8 @@ const loginHandler = async (req, res) => {
     // 生成JWT令牌
     const token = jwt.sign(
       { id: user.id, email: user.email },
-      'your-secret-key', // 替换为实际的密钥
-      { expiresIn: '7d' }
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     // 保存用户信息到session

@@ -1,6 +1,8 @@
+// 加载 .env（必须放在最前，保证后续模块读取环境变量时已生效；文件不存在时自动忽略）
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
-const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const router = require('./routes/index');
@@ -17,19 +19,23 @@ const app = express();
 testConnection();
 
 // CORS中间件解决跨域问题
-app.use(cors());
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  next();
-});
+// 允许的跨域来源通过环境变量 CORS_ORIGINS 配置（逗号分隔）。
+// 未配置时仅允许同源请求（经 Vite 代理 / Nginx 反代时浏览器不会发送跨域 origin，不受影响）。
+const corsWhitelist = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || corsWhitelist.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false); // 不附带 CORS 响应头，浏览器将拦截该跨域请求
+  },
+}));
 
 // 静态资源
 app.use('/public/', express.static(path.join(__dirname, './public/')));
-app.use('/public/uploads/', express.static('./public/uploads/'));
-app.use('/public/uploads/userfile/', express.static('./public/uploads/userfile/'));
-app.use('/node_modules/', express.static(path.join(__dirname, './node_modules/')));
 
 // 模板引擎配置
 app.engine('html', require('express-art-template'));
@@ -44,7 +50,7 @@ app.use(cookieParser());
 // Session配置
 app.use(session({
   name: 'quality_inspection',
-  secret: 'quality_inspection_secret',
+  secret: process.env.SESSION_SECRET || 'quality_inspection_secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -54,11 +60,9 @@ app.use(session({
   }
 }));
 
-// 解析请求体
+// 解析请求体（express 自带，无需重复引入 body-parser）
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
 
 // 挂载路由
 app.use('/api', router);

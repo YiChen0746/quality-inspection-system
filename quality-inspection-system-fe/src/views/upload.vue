@@ -107,7 +107,7 @@ export default {
     
     goBack() {
       // 使用 window.location.href 返回指定地址
-      window.location.href = "http://localhost:5173/upload";  
+      window.location.href = "/upload";  
     },
     handleClick() {
       this.$refs.fileInput.click();
@@ -156,7 +156,8 @@ export default {
           // 返回上传成功后的文件URL
      
           console.log("res.data:", res.data);
-          this.fileUrl = res.data.fileUrl.replace("http://localhost:3000", "http://743c3774.r20.cpolar.top");
+          // 去除后端返回的绝对地址前缀，统一走同域相对路径（本地由 Vite 代理，线上由 Nginx 反代）
+          this.fileUrl = (res.data.fileUrl || "").replace(/^https?:\/\/[^/]+/, "");
           this.fileName = res.data.fileName;
           
           console.log("fileUrl:", this.fileUrl);  // 检查 fileUrl 是否有效
@@ -341,7 +342,7 @@ export default {
     // 从后端获取文件列表
     fetchFiles() {
       // 1. 使用 axios 发送 POST 请求到指定 URL
-      axios.get('http://127.0.0.1:3000')
+      axios.get('')
         .then(response => {
           // 2. 当请求成功时，打印完整的响应数据
           console.log("响应列表:", response);

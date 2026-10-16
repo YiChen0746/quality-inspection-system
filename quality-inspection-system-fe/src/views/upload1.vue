@@ -208,7 +208,7 @@ loadTinyMCE() {
       }
 
       axios
-        .delete(`http://127.0.0.1:3000/api/delete`, {
+        .delete(`/api/delete`, {
           headers: {
             "Content-Type": "application/json",
           },
@@ -253,7 +253,7 @@ loadTinyMCE() {
     },
     fetchFiles() {
       axios
-        .get("http://127.0.0.1:3000/api/files")
+        .get("/api/files")
         .then((response) => {
           this.files = response.data.files;
           console.log("获取文件列表成功：", this.files);
@@ -284,7 +284,7 @@ uploadFile(file) {
         text: '报告生成中，预计耗时1分钟，请耐心等待 ...'
     });
 
-    axios.post("http://localhost:3000/api/upload", formData, {
+    axios.post("/api/upload", formData, {
         headers: {
             "Access-Control-Allow-Origin": "*",
         },
@@ -298,7 +298,7 @@ uploadFile(file) {
             ...res.data.data
         };
 
-        return ExportBriefDataDocx("http://127.0.0.1:3000/public/uploads/report/module3.docx", wordData);
+        return ExportBriefDataDocx("/public/uploads/report/module3.docx", wordData);
     })
     .then(() => {
         return this.fetchFiles(); // 更新文件列表

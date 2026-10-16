@@ -1,12 +1,16 @@
+const path = require('path');
 const { Sequelize } = require('sequelize');
 
-// 数据库配置
+// 加载 .env 文件（若不存在则忽略，直接使用下面的默认值）
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+
+// 数据库配置：优先读取环境变量，未配置时回退到本机开发默认值
 const dbConfig = {
-  host: 'localhost',
-  user: 'root',
-  password: '070404',
-  port: 3306,
-  database: 'quality_inspection'
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'Root@123456',
+  port: Number(process.env.DB_PORT) || 3306,
+  database: process.env.DB_NAME || 'quality_inspection'
 };
 
 // 创建Sequelize实例

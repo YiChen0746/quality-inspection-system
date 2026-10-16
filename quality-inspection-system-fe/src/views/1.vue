@@ -113,7 +113,7 @@ export default {
   //         console.log(file.fileName);
   //         console.log(file.fileUrl);
   //         if (confirm(`确定要删除文件 ${file.fileName} 吗？`)) {
-  //             axios.post('http://localhost:3000/api/delete', {
+  //             axios.post('/api/delete', {
   //                 fileName: file.fileName, // 发送文件名到后端
   //                 fileUrl: file.fileUrl, // 发送文件路径到后端
   //             })
@@ -136,7 +136,7 @@ export default {
       return;
     }
 
-    axios.delete(`http://127.0.0.1:3000/api/delete`, {
+    axios.delete(`/api/delete`, {
       headers: {
         'Content-Type': 'application/json'
       },
@@ -157,7 +157,7 @@ export default {
 
     goBack() {
       // 使用 window.location.href 返回指定地址
-      window.location.href = "http://localhost:5173/upload";  
+      window.location.href = "/upload";  
     },
     handleClick() {
       this.$refs.fileInput.click();
@@ -171,7 +171,7 @@ export default {
       this.uploadFile(file);
     },
     fetchFiles() {
-      axios.get('http://127.0.0.1:3000/api/files')
+      axios.get('/api/files')
           .then(response => {
           this.files = response.data.files;
           })
@@ -208,7 +208,7 @@ export default {
       // /api/upload 是后端文件上传的 API 地址，这个 API 用来接收文件并处理文件上传的逻辑。、
       //formData是要上传的数据
       console.log("开始post请求");
-      axios.post('http://localhost:3000/api/upload', formData, {
+      axios.post('/api/upload', formData, {
           headers: {
             "Content-Type": "multipart/form-data",
             "Access-Control-Allow-Origin": "*",

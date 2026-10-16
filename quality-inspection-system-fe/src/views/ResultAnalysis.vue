@@ -490,7 +490,7 @@ const exportAnalystReports = async () => {
       ...resData
     }
     console.log("即将导出 Word 文档，wordData 内容为：", wordData);  
-    ExportBriefDataDocx("http://127.0.0.1:3000/public/uploads/report/module2.docx", wordData, `${wordData.listname}.docx`);
+    ExportBriefDataDocx("/public/uploads/report/module2.docx", wordData, `${wordData.listname}.docx`);
     loadingInstance.close()
   } catch (err) {
     console.log(err);

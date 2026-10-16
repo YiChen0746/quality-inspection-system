@@ -112,7 +112,7 @@ const handleLogin = async () => {
   
   loading.value = true
   try {
-    const response = await axios.post('http://127.0.0.1:3000/api/login', {
+    const response = await axios.post('/api/login', {
       email: loginForm.email,
       password: loginForm.password
     })
@@ -144,7 +144,7 @@ const handleRegister = async () => {
   
   registerLoading.value = true
   try {
-    const response = await axios.post('http://127.0.0.1:3000/api/register', {
+    const response = await axios.post('/api/register', {
       email: registerForm.email,
       nickname: registerForm.nickname,
       password: registerForm.password

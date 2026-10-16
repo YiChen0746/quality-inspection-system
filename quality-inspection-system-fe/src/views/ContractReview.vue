@@ -608,7 +608,7 @@ const processContract = async () => {
     formData.append('analysis_position', analysisPosition.value);
 
     // 发送请求并处理流式响应
-    const response = await fetch('http://127.0.0.1:3000/api/contract-review/review', {
+    const response = await fetch('/api/contract-review/review', {
       method: 'POST',
       body: formData
     });
@@ -880,7 +880,7 @@ const exportReport = async () => {
     
     console.log('导出报告请求参数:', requestBody);
     
-    const response = await fetch('http://127.0.0.1:3000/api/contract-review/export_review_report', {
+    const response = await fetch('/api/contract-review/export_review_report', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -933,7 +933,7 @@ const testConnection = async () => {
   };
 
   try {
-    const response = await fetch('http://127.0.0.1:3000/api/contract-review/test_connection');
+    const response = await fetch('/api/contract-review/test_connection');
     if (response.ok) {
       networkStatus.value = {
         type: 'success',
@@ -995,7 +995,7 @@ const loadHistoryData = async () => {
       include_miniapp: includeMiniapp.value ? '1' : '0'
     });
     
-    const response = await fetch(`http://127.0.0.1:3000/api/contract-review/history?${params}`, {
+    const response = await fetch(`/api/contract-review/history?${params}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
@@ -1030,7 +1030,7 @@ const reloadHistory = () => {
 // 查看历史记录详情
 const viewHistoryDetail = async (row: any) => {
   try {
-    const response = await fetch(`http://127.0.0.1:3000/api/contract-review/result/${row.id}`, {
+    const response = await fetch(`/api/contract-review/result/${row.id}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
@@ -1076,7 +1076,7 @@ const exportHistoryReport = async (row: any) => {
     
     console.log('导出历史报告请求参数:', requestBody);
     
-    const response = await fetch('http://127.0.0.1:3000/api/contract-review/export_review_report', {
+    const response = await fetch('/api/contract-review/export_review_report', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

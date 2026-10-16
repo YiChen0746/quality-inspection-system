@@ -286,7 +286,7 @@ const submitUpload = async () => {
   });
 
   try {
-    const response = await fetch('http://127.0.0.1:3000/get_quality_jpg_result', {
+    const response = await fetch('/get_quality_jpg_result', {
       method: 'POST',
       body: formData,
     });
@@ -328,7 +328,7 @@ const submitUpload = async () => {
     <el-upload
       ref="uploadExcelRef"
       class="upload-demo"
-      action="http://127.0.0.1:3000/get_quality_list_result"
+      action="/get_quality_list_result"
       :auto-upload="false"
       :on-change="uploadExcelHandler"
       :on-success="uploadExcelSuccessHandler"
@@ -562,7 +562,7 @@ const submitUpload = async () => {
       <el-form-item label="x光图片">
         <el-upload
           v-model:file-list="form.fileList"
-          action="http://127.0.0.1:3000/upload_XImages"
+          action="/upload_XImages"
           list-type="picture-card"
           :on-preview="handlePictureCardPreview"
           :on-success="handleSuccess"

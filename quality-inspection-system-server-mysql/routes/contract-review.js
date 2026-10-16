@@ -10,19 +10,19 @@ const { Op } = require('sequelize'); // 导入Op用于构建查询条件
 
 const router = express.Router();
 
-// DeepSeek API 配置
+// DeepSeek API 配置：优先读取环境变量，未配置时回退到原有默认值
 const DEEPSEEK_CONFIG = {
-  baseURL: 'https://api.deepseek.com/v1',
-  apiKey: 'sk-f643949fa70c4b7e97faa2588ef3fd05'
+  baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
+  apiKey: process.env.DEEPSEEK_API_KEY || 'sk-f643949fa70c4b7e97faa2588ef3fd05'
 };
 
-// 讯飞OCR配置
+// 讯飞OCR配置：优先读取环境变量，未配置时回退到原有默认值
 const OCR_CONFIG = {
-  APPId: '22129c16',
-  APISecret: 'NTU2MGYwOTg1N2M2ZjI4YmFhMjQ4ZDZl',
-  APIKey: 'eb5125232074a9a650d7ddba4265de1b',
-  host: 'api.xf-yun.com',
-  urlPath: '/v1/private/sf8e6aca1'
+  APPId: process.env.OCR_APP_ID || '22129c16',
+  APISecret: process.env.OCR_API_SECRET || 'NTU2MGYwOTg1N2M2ZjI4YmFhMjQ4ZDZl',
+  APIKey: process.env.OCR_API_KEY || 'eb5125232074a9a650d7ddba4265de1b',
+  host: process.env.OCR_HOST || 'api.xf-yun.com',
+  urlPath: process.env.OCR_URL_PATH || '/v1/private/sf8e6aca1'
 };
 
 // 配置文件上传

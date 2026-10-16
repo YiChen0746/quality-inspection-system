@@ -1,25 +1,11 @@
-// DeepSeek API 服务
+// DeepSeek API 服务（经后端代理调用）
+// 密钥只保存在后端环境变量中，前端不再持有任何大模型密钥；
+// 本文件仅负责把对话消息发送到后端 /api/deepseek/chat 并解析响应。
+import { getUserInfo } from '@Setup/storage/user.js';
+
 interface DeepSeekMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'user' | 'assistant';
   content: string;
-}
-
-interface DeepSeekRequest {
-  model: string;
-  messages: DeepSeekMessage[];
-  temperature?: number;
-  max_tokens?: number;
-  stream?: boolean;
-}
-
-interface DeepSeekResponse {
-  choices: Array<{
-    message: {
-      content: string;
-      role: string;
-    };
-    finish_reason: string;
-  }>;
 }
 
 interface DeepSeekStreamResponse {
@@ -33,43 +19,33 @@ interface DeepSeekStreamResponse {
 }
 
 class DeepSeekService {
-  private baseURL = 'https://api.deepseek.com/v1';
-  private apiKey = 'sk-f643949fa70c4b7e97faa2588ef3fd05';
+  // 后端代理地址（相对路径：本地走 Vite 代理，线上走 Nginx 反代）
+  private proxyURL = `${import.meta.env.VITE_API_BASE || ''}/api/deepseek/chat`;
+
+  private authHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = getUserInfo()?.token;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }
 
   // 流式聊天完成
   async chatCompletionStream(
-    messages: DeepSeekMessage[], 
+    messages: DeepSeekMessage[],
     onChunk: (chunk: string) => void,
     onComplete: () => void,
     onError: (error: Error) => void
   ): Promise<void> {
     try {
-      const requestBody: DeepSeekRequest = {
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'system',
-            content: '你是一个专业的法务助手，专门帮助用户解答法律相关问题。请用中文回答，回答要准确、专业、易懂。对于合同相关问题，请提供实用的建议和注意事项。支持markdown格式输出。'
-          },
-          ...messages
-        ],
-        temperature: 0.7,
-        max_tokens: 2000,
-        stream: true
-      };
-
-      const response = await fetch(`${this.baseURL}/chat/completions`, {
+      const response = await fetch(this.proxyURL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify(requestBody)
+        headers: this.authHeaders(),
+        body: JSON.stringify({ messages, stream: true })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('DeepSeek API Error Response:', errorText);
+        console.error('DeepSeek 代理 Error Response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
@@ -83,7 +59,7 @@ class DeepSeekService {
 
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) {
           onComplete();
           break;
@@ -101,10 +77,13 @@ class DeepSeekService {
               onComplete();
               return;
             }
-            
+
             try {
               const parsed: DeepSeekStreamResponse = JSON.parse(data);
-              const content = parsed.choices[0]?.delta?.content;
+              if (parsed.error) {
+                throw new Error(parsed.error);
+              }
+              const content = parsed.choices?.[0]?.delta?.content;
               if (content) {
                 onChunk(content);
               }
@@ -115,11 +94,11 @@ class DeepSeekService {
         }
       }
     } catch (error) {
-      console.error('DeepSeek Stream API Error:', error);
+      console.error('DeepSeek 代理 Stream Error:', error);
       if (error instanceof Error) {
         onError(new Error(`法务助手暂时无法回答，请稍后重试。错误信息: ${error.message}`));
       } else {
-        onError(new Error('调用DeepSeek API失败，请稍后重试'));
+        onError(new Error('调用DeepSeek失败，请稍后重试'));
       }
     }
   }
@@ -127,47 +106,32 @@ class DeepSeekService {
   // 保留原有的非流式方法作为备用
   async chatCompletion(messages: DeepSeekMessage[]): Promise<string> {
     try {
-      const requestBody: DeepSeekRequest = {
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'system',
-            content: '你是一个专业的法务助手，专门帮助用户解答法律相关问题。请用中文回答，回答要准确、专业、易懂。对于合同相关问题，请提供实用的建议和注意事项。'
-          },
-          ...messages
-        ],
-        temperature: 0.7,
-        max_tokens: 2000
-      };
-
-      const response = await fetch(`${this.baseURL}/chat/completions`, {
+      const response = await fetch(this.proxyURL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify(requestBody)
+        headers: this.authHeaders(),
+        body: JSON.stringify({ messages, stream: false })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('DeepSeek API Error Response:', errorText);
+        console.error('DeepSeek 代理 Error Response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
-      const data: DeepSeekResponse = await response.json();
-      
-      if (data.choices && data.choices.length > 0 && data.choices[0].message.content) {
-        return data.choices[0].message.content.trim();
+      const data = await response.json();
+      const content = data?.data?.answer;
+
+      if (content) {
+        return String(content).trim();
       } else {
-        throw new Error('DeepSeek API返回了空响应');
+        throw new Error(data?.message || 'DeepSeek 代理返回了空响应');
       }
     } catch (error) {
-      console.error('DeepSeek API Error:', error);
+      console.error('DeepSeek 代理 Error:', error);
       if (error instanceof Error) {
         throw new Error(`法务助手暂时无法回答，请稍后重试。错误信息: ${error.message}`);
       } else {
-        throw new Error('调用DeepSeek API失败，请稍后重试');
+        throw new Error('调用DeepSeek失败，请稍后重试');
       }
     }
   }
