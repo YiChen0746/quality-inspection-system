@@ -10,6 +10,7 @@ const filesAPI = require('./files');
 const contractReviewAPI = require('./contract-review');
 const deepseekProxyAPI = require('./deepseek-proxy');
 const featuresAPI = require('./features');
+const chatSessionAPI = require('./chat-session');
 const auth = require('../middleware/auth');
 const multer = require('multer');
 
@@ -78,6 +79,9 @@ router.post('/intelligent_qa', chatAPI.getChatAnswer);
 
 // ================= 大模型代理（密钥仅存于服务端） ================
 router.use('/deepseek', deepseekProxyAPI);
+
+// ================= 聊天会话历史 ================
+router.use('/chat', chatSessionAPI);
 
 // ================= 文件上传和管理 ================
 // 上传文件

@@ -16,6 +16,19 @@ interface DeepSeekStreamResponse {
     };
     finish_reason?: string;
   }>;
+  error?: string;
+  type?: string;
+  session_id?: number;
+  is_new?: boolean;
+}
+
+interface ChatStreamOptions {
+  messages: DeepSeekMessage[];
+  sessionId?: number | null;
+  onChunk: (chunk: string) => void;
+  onComplete: () => void;
+  onError: (error: Error) => void;
+  onSessionStart?: (sessionId: number, isNew: boolean) => void;
 }
 
 class DeepSeekService {
@@ -29,18 +42,17 @@ class DeepSeekService {
     return headers;
   }
 
-  // 流式聊天完成
-  async chatCompletionStream(
-    messages: DeepSeekMessage[],
-    onChunk: (chunk: string) => void,
-    onComplete: () => void,
-    onError: (error: Error) => void
-  ): Promise<void> {
+  // 流式聊天完成（支持会话）
+  async chatCompletionStream(options: ChatStreamOptions): Promise<void> {
+    const { messages, sessionId, onChunk, onComplete, onError, onSessionStart } = options;
     try {
+      const body: Record<string, unknown> = { messages, stream: true };
+      if (sessionId) body.session_id = sessionId;
+
       const response = await fetch(this.proxyURL, {
         method: 'POST',
         headers: this.authHeaders(),
-        body: JSON.stringify({ messages, stream: true })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
@@ -56,6 +68,7 @@ class DeepSeekService {
 
       const decoder = new TextDecoder();
       let buffer = '';
+      let sessionNotified = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -80,6 +93,13 @@ class DeepSeekService {
 
             try {
               const parsed: DeepSeekStreamResponse = JSON.parse(data);
+              
+              // 处理自定义 session 事件
+              if (parsed.type === 'session' && parsed.session_id && !sessionNotified) {
+                sessionNotified = true;
+                onSessionStart?.(parsed.session_id, parsed.is_new || false);
+              }
+              
               if (parsed.error) {
                 throw new Error(parsed.error);
               }
@@ -88,7 +108,8 @@ class DeepSeekService {
                 onChunk(content);
               }
             } catch (parseError) {
-              console.warn('解析流数据失败:', parseError);
+              // 不是合法 JSON 的块直接跳过（可能是自定义事件）
+              console.warn('解析流数据块:', data.slice(0, 60));
             }
           }
         }
@@ -104,12 +125,15 @@ class DeepSeekService {
   }
 
   // 保留原有的非流式方法作为备用
-  async chatCompletion(messages: DeepSeekMessage[]): Promise<string> {
+  async chatCompletion(messages: DeepSeekMessage[], sessionId?: number): Promise<string> {
     try {
+      const body: Record<string, unknown> = { messages, stream: false };
+      if (sessionId) body.session_id = sessionId;
+
       const response = await fetch(this.proxyURL, {
         method: 'POST',
         headers: this.authHeaders(),
-        body: JSON.stringify({ messages, stream: false })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
