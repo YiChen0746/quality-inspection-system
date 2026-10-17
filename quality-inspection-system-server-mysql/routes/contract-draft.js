@@ -7,6 +7,11 @@ const fs = require('fs');
 const path = require('path');
 const{ Contract } = require('../models');
 
+// 通用 OpenAI 兼容大模型配置（DeepSeek / 智谱GLM / 硅基流动 / 本地Ollama 均可接入）
+const LLM_BASE = process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
+const LLM_KEY = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+const LLM_MODEL = process.env.LLM_MODEL || 'deepseek-chat';
+
 // 查找可用的中文字体（优先 .ttf 格式，确保 PDF 中文正常显示）
 function findChineseFont() {
   const candidates = [
@@ -58,8 +63,8 @@ const generateContract = async (req, res) => {
     
     while (retryCount < maxRetries) {
       try {
-        contractResponse = await axios.post('https://api.deepseek.com/v1/chat/completions', {
-          model: "deepseek-chat",
+        contractResponse = await axios.post(`${LLM_BASE}/chat/completions`, {
+          model: LLM_MODEL,
           messages: [
             {
               role: "user",
@@ -72,7 +77,7 @@ const generateContract = async (req, res) => {
         }, {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer sk-f643949fa70c4b7e97faa2588ef3fd05'
+            'Authorization': `Bearer ${LLM_KEY}`
           },
           timeout: 60000,
           httpsAgent: new (require('https').Agent)({

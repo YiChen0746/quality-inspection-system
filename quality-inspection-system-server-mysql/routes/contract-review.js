@@ -10,17 +10,18 @@ const { Op } = require('sequelize'); // 导入Op用于构建查询条件
 
 const router = express.Router();
 
-// DeepSeek API 配置：优先读取环境变量，未配置时回退到原有默认值
+// 大模型配置：优先读通用 LLM_* 变量，兼容旧的 DEEPSEEK_* 变量（DeepSeek / 智谱GLM / 硅基流动 / 本地Ollama 均可接入）
 const DEEPSEEK_CONFIG = {
-  baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
-  apiKey: process.env.DEEPSEEK_API_KEY || 'sk-f643949fa70c4b7e97faa2588ef3fd05'
+  baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
+  apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '',
+  model: process.env.LLM_MODEL || 'deepseek-chat'
 };
 
-// 讯飞OCR配置：优先读取环境变量，未配置时回退到原有默认值
+// 讯飞OCR配置：仅从环境变量读取（密钥不得写入代码）
 const OCR_CONFIG = {
-  APPId: process.env.OCR_APP_ID || '22129c16',
-  APISecret: process.env.OCR_API_SECRET || 'NTU2MGYwOTg1N2M2ZjI4YmFhMjQ4ZDZl',
-  APIKey: process.env.OCR_API_KEY || 'eb5125232074a9a650d7ddba4265de1b',
+  APPId: process.env.OCR_APP_ID || '',
+  APISecret: process.env.OCR_API_SECRET || '',
+  APIKey: process.env.OCR_API_KEY || '',
   host: process.env.OCR_HOST || 'api.xf-yun.com',
   urlPath: process.env.OCR_URL_PATH || '/v1/private/sf8e6aca1'
 };
@@ -189,7 +190,7 @@ ${contractContent}
       ];
 
       const requestBody = {
-        model: 'deepseek-chat',
+        model: DEEPSEEK_CONFIG.model,
         messages: messages,
         temperature: 0.3, // 降低随机性，提高一致性
         max_tokens: 4000
@@ -488,7 +489,7 @@ router.get('/test_connection', async (req, res) => {
     
     // 发送一个简单的测试请求到DeepSeek API
     const testResponse = await axios.post(`${DEEPSEEK_CONFIG.baseURL}/chat/completions`, {
-      model: 'deepseek-chat',
+      model: DEEPSEEK_CONFIG.model,
       messages: [
         {
           role: 'user',
@@ -512,7 +513,7 @@ router.get('/test_connection', async (req, res) => {
         data: {
           status: 'connected',
           response_time: Date.now(),
-          model: 'deepseek-chat'
+          model: DEEPSEEK_CONFIG.model
         }
       });
     } else {

@@ -1,12 +1,14 @@
-// DeepSeek 流式对话代理
-// 浏览器 -> 本服务 -> DeepSeek。密钥只存在于服务端环境变量中，前端不再持有任何密钥。
+// 通用 OpenAI 兼容大模型代理（DeepSeek / 智谱GLM / 硅基流动 / 本地Ollama 均可接入）
+// 浏览器 -> 本服务 -> 大模型API。密钥只存在于服务端环境变量中，前端不再持有任何密钥。
 const express = require('express');
 const axios = require('axios');
 
 const router = express.Router();
 
-const DEEPSEEK_BASE = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
+// 优先读通用 LLM_* 变量，兼容旧的 DEEPSEEK_* 变量
+const LLM_BASE = process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
+const LLM_KEY = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+const LLM_MODEL = process.env.LLM_MODEL || 'deepseek-chat';
 
 // 与原前端 deepseek.ts 一致的系统提示词，由服务端注入，防止前端伪造 system 角色
 const SYSTEM_PROMPT =
@@ -17,8 +19,8 @@ const SYSTEM_PROMPT =
 // body: { messages: [{role: 'user'|'assistant', content}], stream?: boolean, temperature?, max_tokens? }
 // stream=true（默认）时以 SSE 透传 DeepSeek 的流式响应；stream=false 时返回普通 JSON
 router.post('/chat', async (req, res) => {
-  if (!DEEPSEEK_KEY) {
-    return res.status(500).json({ err_code: 500, message: '服务端未配置 DEEPSEEK_API_KEY，请联系管理员' });
+  if (!LLM_KEY) {
+    return res.status(500).json({ err_code: 500, message: '服务端未配置 LLM_API_KEY（大模型密钥），请联系管理员' });
   }
 
   const { messages = [], stream = true, temperature = 0.7, max_tokens = 2000 } = req.body || {};
@@ -34,7 +36,7 @@ router.post('/chat', async (req, res) => {
   }
 
   const upstreamBody = {
-    model: 'deepseek-chat',
+    model: LLM_MODEL,
     messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...safeMessages],
     temperature,
     max_tokens,
@@ -42,10 +44,10 @@ router.post('/chat', async (req, res) => {
   };
 
   try {
-    const upstream = await axios.post(`${DEEPSEEK_BASE}/chat/completions`, upstreamBody, {
+    const upstream = await axios.post(`${LLM_BASE}/chat/completions`, upstreamBody, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${DEEPSEEK_KEY}`,
+        Authorization: `Bearer ${LLM_KEY}`,
       },
       responseType: stream ? 'stream' : 'json',
       timeout: 120000,
