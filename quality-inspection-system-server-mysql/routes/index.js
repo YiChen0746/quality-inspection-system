@@ -9,6 +9,7 @@ const uploadAPI = require('./upload');
 const filesAPI = require('./files');
 const contractReviewAPI = require('./contract-review');
 const deepseekProxyAPI = require('./deepseek-proxy');
+const featuresAPI = require('./features');
 const auth = require('../middleware/auth');
 const multer = require('multer');
 
@@ -104,5 +105,15 @@ router.post('/generate_contract', contractDraftAPI.generateContract);
 router.post('/export_contract_docx', contractDraftAPI.exportContractDocx);
 router.post('/export_contract_pdf', contractDraftAPI.exportContractPdf);
 router.get('/contract_templates', contractDraftAPI.getContractTemplates);
+
+// ================= 扩展功能（到期提醒/风险评分/统计面板/批量上传） ================
+// 即将到期合同
+router.get('/expiring_contracts', featuresAPI.getExpiringContracts);
+// 合同风险评分
+router.post('/score_contract', featuresAPI.scoreContract);
+// 数据统计面板
+router.get('/dashboard_stats', featuresAPI.getDashboardStats);
+// 批量上传
+router.post('/batch_upload', featuresAPI.batchUpload.array('files', 10), featuresAPI.handleBatchUpload);
 
 module.exports = router;

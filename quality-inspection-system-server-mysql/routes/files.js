@@ -19,8 +19,8 @@ const getContractFiles = async (req, res) => {
     // 查询合同文件列表
     const contracts = await Contract.findAll({
       where,
-      attributes: ['id', 'file_name', 'file_path', 'file_size', 'createdAt'],
-      order: [['createdAt', 'DESC']]
+      attributes: ['id', 'file_name', 'file_path', 'file_size', 'created_at', 'contract_type', 'expiry_date', 'risk_score', 'risk_level'],
+      order: [['created_at', 'DESC']]
     });
 
     // 转换为前端需要的格式
@@ -29,7 +29,11 @@ const getContractFiles = async (req, res) => {
       fileName: contract.file_name,
       filePath: contract.file_path,
       fileSize: contract.file_size,
-      uploadTime: contract.createdAt
+      uploadTime: contract.created_at,
+      contractType: contract.contract_type,
+      expiryDate: contract.expiry_date,
+      riskScore: contract.risk_score,
+      riskLevel: contract.risk_level
     }));
 
     return res.status(200).json({
@@ -91,24 +95,39 @@ const deleteContractFile = async (req, res) => {
   }
 };
 
-// 搜索合同文件
+// 搜索合同文件（支持文件名关键词 + 时间范围 + 合同类型筛选）
 const searchContractFiles = async (req, res) => {
   try {
-    const { keyword } = req.query;
-    if (!keyword) {
-      return getContractFiles(req, res);
-    }
+    const { keyword, startDate, endDate, contractType } = req.query;
 
     // 获取用户ID（如果有）
     const userId = req.session && req.session.user ? req.session.user.id : null;
 
     // 查询条件
-    const where = {
-      file_name: {
+    const where = {};
+
+    if (keyword) {
+      where.file_name = {
         [Op.like]: `%${keyword}%`
-      }
-    };
-    
+      };
+    }
+
+    // 时间范围筛选（按创建时间）
+    if (startDate && endDate) {
+      where.created_at = {
+        [Op.between]: [new Date(startDate), new Date(endDate + ' 23:59:59')]
+      };
+    } else if (startDate) {
+      where.created_at = { [Op.gte]: new Date(startDate) };
+    } else if (endDate) {
+      where.created_at = { [Op.lte]: new Date(endDate + ' 23:59:59') };
+    }
+
+    // 合同类型筛选
+    if (contractType) {
+      where.contract_type = contractType;
+    }
+
     if (userId) {
       where.user_id = userId;
     }
@@ -116,8 +135,8 @@ const searchContractFiles = async (req, res) => {
     // 查询合同文件列表
     const contracts = await Contract.findAll({
       where,
-      attributes: ['id', 'file_name', 'file_path', 'file_size', 'createdAt'],
-      order: [['createdAt', 'DESC']]
+      attributes: ['id', 'file_name', 'file_path', 'file_size', 'created_at', 'contract_type', 'expiry_date', 'risk_score', 'risk_level'],
+      order: [['created_at', 'DESC']]
     });
 
     // 转换为前端需要的格式
@@ -126,7 +145,11 @@ const searchContractFiles = async (req, res) => {
       fileName: contract.file_name,
       filePath: contract.file_path,
       fileSize: contract.file_size,
-      uploadTime: contract.createdAt
+      uploadTime: contract.created_at,
+      contractType: contract.contract_type,
+      expiryDate: contract.expiry_date,
+      riskScore: contract.risk_score,
+      riskLevel: contract.risk_level
     }));
 
     return res.status(200).json({

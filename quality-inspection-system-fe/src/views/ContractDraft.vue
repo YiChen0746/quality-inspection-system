@@ -21,6 +21,7 @@
             <div class="template-name">{{ template.name }}</div>
             <div class="template-desc">{{ template.description }}</div>
             <div class="template-category">{{ template.category }}</div>
+            <button class="btn-use-template" @click.stop="useTemplate(template)">使用模板</button>
           </div>
         </div>
       </div>
@@ -108,6 +109,17 @@
           </div>
 
           <div class="form-group">
+            <label for="expiryDate">到期日期</label>
+            <el-date-picker
+              v-model="contractForm.expiryDate"
+              type="date"
+              placeholder="请选择合同到期日期"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </div>
+
+          <div class="form-group">
             <label for="description">合同描述 *</label>
             <textarea 
               id="description" 
@@ -157,6 +169,9 @@
             <div class="preview-header">
               <h4>{{ currentContract.contractInfo?.contractName || '合同预览' }}</h4>
               <div class="preview-actions">
+                <el-button size="small" type="warning" @click="scoreCurrentContract" :loading="isScoring">
+                  风险评分
+                </el-button>
                 <button @click="regenerateContract" class="btn-icon" title="重新生成">
                   <i class="icon-refresh">🔄</i>
                 </button>
@@ -165,9 +180,43 @@
                 </button>
               </div>
             </div>
-            
+
+            <!-- 风险评分结果 -->
+            <div v-if="riskScore" class="risk-score-panel">
+              <div class="score-header">
+                <el-progress
+                  type="dashboard"
+                  :percentage="riskScore.score"
+                  :color="scoreColor"
+                  :width="90"
+                >
+                  <template #default>
+                    <span class="score-value">{{ riskScore.score }}</span>
+                  </template>
+                </el-progress>
+                <div class="score-level">
+                  <div class="level-label">风险等级</div>
+                  <el-tag :type="riskScore.level === '高' ? 'danger' : (riskScore.level === '中' ? 'warning' : 'success')" size="large">
+                    {{ riskScore.level }}风险
+                  </el-tag>
+                </div>
+              </div>
+              <div v-if="riskScore.risks?.length" class="score-detail">
+                <div class="detail-title">风险点：</div>
+                <ul>
+                  <li v-for="(r, i) in riskScore.risks" :key="'r'+i">{{ r }}</li>
+                </ul>
+              </div>
+              <div v-if="riskScore.suggestions?.length" class="score-detail">
+                <div class="detail-title">建议：</div>
+                <ul>
+                  <li v-for="(s, i) in riskScore.suggestions" :key="'s'+i">{{ s }}</li>
+                </ul>
+              </div>
+            </div>
+
             <div class="contract-content">
-              <textarea 
+              <textarea
                 v-model="currentContract.contractContent"
                 class="contract-textarea"
                 @input="adjustTextareaHeight"
@@ -261,15 +310,26 @@ export default {
         thirdParty: '',
         description: '',
         subject: '',
-        contractType: ''
+        contractType: '',
+        expiryDate: ''
       },
       errors: {},
       currentContract: null,
       contractHistory: [],
       exportDialogVisible: false,
       exportFormat: 'docx',
-      isExporting: false
+      isExporting: false,
+      riskScore: null,
+      isScoring: false
     };
+  },
+  computed: {
+    scoreColor() {
+      const s = this.riskScore?.score || 0;
+      if (s <= 40) return '#67c23a';
+      if (s <= 70) return '#e6a23c';
+      return '#f56c6c';
+    }
   },
   mounted() {
     this.loadTemplates();
@@ -295,6 +355,55 @@ export default {
       // 根据模板自动填充部分信息
       if (template.category) {
         this.contractForm.contractType = template.category;
+      }
+    },
+
+    // 使用模板：把模板名称和模板内容一键填充到表单
+    useTemplate(template) {
+      this.selectedTemplate = template;
+      this.contractForm.contractName = template.name.replace(/模板$/, '合同');
+      if (template.category) {
+        this.contractForm.contractType = template.category;
+      }
+      if (template.content) {
+        this.contractForm.description = template.content;
+      }
+      ElMessage.success(`已应用模板「${template.name}」，请补充甲乙双方信息`);
+    },
+
+    // 对当前合同进行风险评分
+    async scoreCurrentContract() {
+      if (!this.currentContract) {
+        ElMessage.warning('请先生成合同内容');
+        return;
+      }
+      this.isScoring = true;
+      this.riskScore = null;
+      try {
+        const response = await fetch('/api/score_contract', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({
+            contractContent: this.currentContract.contractContent,
+            contractName: this.currentContract.contractInfo?.contractName,
+            contractId: this.currentContract.contractInfo?.contractId
+          })
+        });
+        const data = await response.json();
+        if (data.err_code === 0) {
+          this.riskScore = data.data;
+          ElMessage.success('风险评分完成');
+        } else {
+          ElMessage.error(data.message || '评分失败');
+        }
+      } catch (error) {
+        console.error('风险评分失败:', error);
+        ElMessage.error('网络错误，请稍后重试');
+      } finally {
+        this.isScoring = false;
       }
     },
 
@@ -451,7 +560,8 @@ export default {
         thirdParty: '',
         description: '',
         subject: '',
-        contractType: ''
+        contractType: '',
+        expiryDate: ''
       };
       this.errors = {};
       this.selectedTemplate = null;
@@ -887,6 +997,60 @@ export default {
 .history-parties {
   font-size: 12px;
   color: #3498db;
+}
+
+.btn-use-template {
+  margin-top: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #fff;
+  background-color: #3498db;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-use-template:hover {
+  background-color: #2980b9;
+}
+
+.risk-score-panel {
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background-color: #fafafa;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.score-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.score-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+.score-level .level-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.score-detail {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #606266;
+}
+.score-detail .detail-title {
+  font-weight: 600;
+  color: #303133;
+}
+.score-detail ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+.score-detail li {
+  margin-bottom: 2px;
 }
 
 /* 响应式设计 */

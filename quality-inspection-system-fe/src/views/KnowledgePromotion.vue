@@ -43,6 +43,32 @@
 // import KangFU16 from '@/assets/images/kangfu/fu.png'
 
 const knowledgeLists = []
+
+// ============ 数据统计面板 ============
+import { ref, onMounted } from 'vue'
+import { getAuthHeaders } from '@Setup/storage/user.js'
+
+const stats = ref({
+  totalContracts: 0,
+  monthNew: 0,
+  expiringCount: 0,
+  highRiskCount: 0,
+  avgRiskScore: 0
+})
+
+const loadDashboardStats = async () => {
+  try {
+    const res = await fetch('/api/dashboard_stats', { headers: getAuthHeaders() })
+    const data = await res.json()
+    if (data.err_code === 0) {
+      stats.value = data.data
+    }
+  } catch (e) {
+    console.error('获取统计数据失败:', e)
+  }
+}
+
+onMounted(loadDashboardStats)
 </script>
 
 <template>
@@ -267,6 +293,32 @@ const knowledgeLists = []
     </section>
   </div>
 
+  <!-- 数据统计面板 -->
+  <section class="stats-section">
+    <div class="stats-container">
+      <el-card class="stat-card" shadow="hover">
+        <div class="stat-value">{{ stats.totalContracts }}</div>
+        <div class="stat-label">合同总数</div>
+      </el-card>
+      <el-card class="stat-card" shadow="hover">
+        <div class="stat-value" style="color: #409eff;">{{ stats.monthNew }}</div>
+        <div class="stat-label">本月新增</div>
+      </el-card>
+      <el-card class="stat-card" shadow="hover">
+        <div class="stat-value" style="color: #e6a23c;">{{ stats.expiringCount }}</div>
+        <div class="stat-label">即将到期（30天内）</div>
+      </el-card>
+      <el-card class="stat-card" shadow="hover">
+        <div class="stat-value" style="color: #f56c6c;">{{ stats.highRiskCount }}</div>
+        <div class="stat-label">高风险合同</div>
+      </el-card>
+      <el-card class="stat-card" shadow="hover">
+        <div class="stat-value" style="color: #67c23a;">{{ stats.avgRiskScore }}</div>
+        <div class="stat-label">平均风险分</div>
+      </el-card>
+    </div>
+  </section>
+
   <!-- 特点区域 -->
   <section class="features">
     <div class="container2">
@@ -350,6 +402,35 @@ const knowledgeLists = []
 </template>
 
 <style scoped lang="less">
+/* 数据统计面板 */
+.stats-section {
+  padding: 30px 0;
+  background-color: #f5f8fd;
+}
+.stats-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0 20px;
+}
+.stat-card {
+  flex: 1;
+  min-width: 160px;
+  text-align: center;
+}
+.stat-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+.stat-label {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--brand-text-grey);
+}
 /* 主视觉区域 */
 .container1 {
   /* 让子元素垂直排列 */

@@ -33,7 +33,7 @@ function findChineseFont() {
 // 合同起草API
 const generateContract = async (req, res) => {
   try {
-    const { contractName, partyA, partyB, thirdParty, description, subject } = req.body;
+    const { contractName, partyA, partyB, thirdParty, description, subject, expiryDate } = req.body;
     
     // 验证必填字段
     if (!contractName || !partyA || !partyB || !description || !subject) {
@@ -104,16 +104,21 @@ const generateContract = async (req, res) => {
 
     const contractContent = contractResponse.data.choices?.[0]?.message?.content || '合同生成失败';
 
-// 保存合同到数据库
-    // const contract = await Contract.create({
-    //   file_name: `${contractName}_起草合同.txt`,
-    //   file_path: null, // 起草的合同没有实际文件路径
-    //   file_size: contractContent.length,
-    //   content: contractContent,
-    //   user_id: req.session?.user?.id || null,
-    //   type: 'draft' // 标记为起草类型
-    // });
-
+    // 保存合同到数据库
+    let contract;
+    try {
+      contract = await Contract.create({
+        file_name: `${contractName}_起草合同.txt`,
+        file_path: '', // 起草的合同没有实际文件路径，表限制NOT NULL，用空字符串占位
+        file_size: contractContent.length,
+        content: contractContent,
+        user_id: req.user?.id || null,
+        contract_type: 'draft', // 标记为起草类型
+        expiry_date: expiryDate || null
+      });
+    } catch (dbError) {
+      console.error('合同保存到数据库失败:', dbError);
+    }
 
     return res.status(200).json({
       err_code: 0,
@@ -127,8 +132,9 @@ const generateContract = async (req, res) => {
           thirdParty,
           description,
           subject,
+          expiryDate: expiryDate || null,
           generateTime: new Date().toLocaleString('zh-CN'),
-          // contractId: contract.id // 返回合同ID
+          contractId: contract?.id
         }
       }
     });
@@ -381,35 +387,40 @@ const getContractTemplates = async (req, res) => {
         name: '买卖合同模板',
         description: '适用于商品买卖交易',
         category: '买卖合同',
-        fields: ['商品名称', '数量', '单价', '总价', '交付时间', '付款方式']
+        fields: ['商品名称', '数量', '单价', '总价', '交付时间', '付款方式'],
+        content: '本合同为买卖合同，卖方应向买方交付符合约定质量标准的商品，买方应按约定支付价款。主要条款包括：商品名称、规格型号、数量、单价、总价、交付地点与方式、付款方式、验收标准、违约责任及争议解决等。交付时间以双方约定为准，延迟交付或付款应承担违约金。'
       },
       {
         id: 2,
         name: '租赁合同模板',
         description: '适用于房屋、设备等租赁',
         category: '租赁合同',
-        fields: ['租赁物', '租期', '租金', '押金', '使用条件', '维修责任']
+        fields: ['租赁物', '租期', '租金', '押金', '使用条件', '维修责任'],
+        content: '本合同为租赁合同，出租方将租赁物交付承租方使用，承租方支付租金。主要条款包括：租赁物描述、租赁期限、租金及支付方式、押金数额与退还条件、维修责任划分、使用限制、转租约定、提前解约条件、违约责任等。租赁期满，承租方应按时返还租赁物。'
       },
       {
         id: 3,
         name: '服务合同模板',
         description: '适用于各类服务提供',
         category: '服务合同',
-        fields: ['服务内容', '服务期限', '服务费用', '服务标准', '验收标准']
+        fields: ['服务内容', '服务期限', '服务费用', '服务标准', '验收标准'],
+        content: '本合同为服务合同，服务方应按约定向委托方提供专业服务。主要条款包括：服务内容、服务期限、服务费用及支付节点、服务标准与质量要求、验收流程、知识产权归属、保密义务、违约责任、争议解决等。服务方应确保服务质量，委托方应按时支付服务费用。'
       },
       {
         id: 4,
         name: '劳动合同模板',
         description: '适用于雇佣关系建立',
         category: '劳动合同',
-        fields: ['工作岗位', '工作地点', '工作时间', '薪资待遇', '社会保险']
+        fields: ['工作岗位', '工作地点', '工作时间', '薪资待遇', '社会保险'],
+        content: '本合同为劳动合同，用人单位与劳动者建立劳动关系。主要条款包括：工作岗位、工作地点、工作时间与休息休假、劳动合同期限、试用期、薪资待遇、社会保险与福利待遇、劳动保护、劳动纪律、合同变更与解除、经济补偿、保密与竞业限制、争议解决等。双方应遵守劳动法律法规。'
       },
       {
         id: 5,
         name: '借款合同模板',
         description: '适用于资金借贷',
         category: '借款合同',
-        fields: ['借款金额', '借款期限', '利率', '还款方式', '担保方式']
+        fields: ['借款金额', '借款期限', '利率', '还款方式', '担保方式'],
+        content: '本合同为借款合同，贷款人向借款人提供借款，借款人按期还本付息。主要条款包括：借款金额、借款用途、借款期限、利率及计息方式、还款方式与还款计划、担保方式（抵押/质押/保证）、提前还款、逾期罚息、违约责任、争议解决等。借款人应专款专用，按期足额还款。'
       }
     ];
 

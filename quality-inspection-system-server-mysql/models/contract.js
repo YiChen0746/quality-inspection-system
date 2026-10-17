@@ -38,6 +38,27 @@ const Contract = sequelize.define('Contract', {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
     comment: '创建时间'
+  },
+  contract_type: {
+    type: DataTypes.STRING(50),
+    allowNull: false,
+    defaultValue: 'draft',
+    comment: '合同类型：draft-起草，review-审查'
+  },
+  expiry_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    comment: '合同到期日期'
+  },
+  risk_score: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '风险评分 0-100'
+  },
+  risk_level: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    comment: '风险等级：低/中/高'
   }
   // type: {
   //   type: DataTypes.ENUM('review', 'draft'), // 审查或起草
