@@ -65,9 +65,9 @@ const displayMessage = computed(() => {
   }
   .message{
     flex: 1;
-    background: #fdfdfe;
-    border-radius: 8px;
-    box-shadow: 0 16px 20px 0 rgba(174,167,223,.06);
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
     display: flex;
     flex-direction: column;
     padding: 14px 18px;
@@ -75,11 +75,14 @@ const displayMessage = computed(() => {
     margin-right: 12px;
     font-size: 14px;
     white-space: pre-line;
+    color: #1a1a2e;
+    font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Ubuntu, Helvetica Neue, Helvetica, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei UI, Microsoft YaHei, Source Han Sans CN, sans-serif, Apple Color Emoji, Segoe UI Emoji !important;
+    transition: all 0.2s ease;
     &-user{
-      background: transparent;
-      padding: 7px 0 13px;
-      color: rgba(0, 0, 0, .85);
-      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Ubuntu, Helvetica Neue, Helvetica, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei UI, Microsoft YaHei, Source Han Sans CN, sans-serif, Apple Color Emoji, Segoe UI Emoji !important;
+      background: #ffffff;
+    }
+    &-bot{
+      background: #ffffff;
     }
   }
   
