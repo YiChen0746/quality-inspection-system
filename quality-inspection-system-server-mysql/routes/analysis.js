@@ -161,8 +161,6 @@ const getContractStatistics = async (req, res) => {
     const startDate = moment().subtract(days, 'days').startOf('day');
     const endDate = moment().endOf('day');
     
-    console.log('查询时间范围:', startDate.format('YYYY-MM-DD'), '到', endDate.format('YYYY-MM-DD'));
-    
     let reviewData = [];
     let draftData = [];
     let totalReview = 0;
@@ -171,129 +169,73 @@ const getContractStatistics = async (req, res) => {
     let todayDraft = 0;
     
     try {
-      // 检查表是否存在
-      const tables = await sequelize.query('SHOW TABLES', { type: sequelize.QueryTypes.SHOWTABLES });
+      // 合同审查数据：从 contracts 表查 contract_type = 'review'
+      reviewData = await sequelize.query(`
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM contracts 
+        WHERE created_at BETWEEN ? AND ? 
+          AND contract_type = 'review'
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at)
+      `, {
+        replacements: [startDate.toDate(), endDate.toDate()],
+        type: sequelize.QueryTypes.SELECT
+      });
       
-      // 获取合同审查数据
-      if (tables.includes('quality_results')) {
-        try {
-          reviewData = await sequelize.query(`
-            SELECT DATE(created_at) as date, COUNT(*) as count
-            FROM quality_results 
-            WHERE created_at BETWEEN ? AND ?
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at)
-          `, {
-            replacements: [startDate.toDate(), endDate.toDate()],
-            type: sequelize.QueryTypes.SELECT
-          });
-          
-          totalReview = await QualityResult.count({
-            where: {
-              created_at: {
-                [Op.between]: [startDate.toDate(), endDate.toDate()]
-              }
-            }
-          });
-          
-          const todayStart = moment().startOf('day');
-          const todayEnd = moment().endOf('day');
-          
-          todayReview = await QualityResult.count({
-            where: {
-              created_at: {
-                [Op.between]: [todayStart.toDate(), todayEnd.toDate()]
-              }
-            }
-          });
-        } catch (error) {
-          console.log('查询quality_results表失败:', error.message);
+      totalReview = await Contract.count({
+        where: {
+          contract_type: 'review',
+          created_at: {
+            [Op.between]: [startDate.toDate(), endDate.toDate()]
+          }
         }
-      } else {
-        console.log('quality_results表不存在');
-      }
+      });
       
-      // 获取合同起草数据
-      if (tables.includes('contracts')) {
-        try {
- // 首先检查contracts表是否有type字段
-          // const columns = await sequelize.query(`
-          //   SHOW COLUMNS FROM contracts LIKE 'type'
-          // `, { type: sequelize.QueryTypes.SELECT });
-          
-          // let typeCondition = "";
-          // if (columns.length > 0) {
-          //   // 如果存在type字段，只统计类型为'draft'的记录
-          //   typeCondition = "AND type = 'draft'";
-          // }
-
-          draftData = await sequelize.query(`
-            SELECT DATE(created_at) as date, COUNT(*) as count
-            FROM contracts 
-            WHERE created_at BETWEEN ? AND ? 
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at)
-          `, {
-            replacements: [startDate.toDate(), endDate.toDate()],
-            type: sequelize.QueryTypes.SELECT
-          });
-          
-// 统计总数
-          // let draftWhereCondition = {
-          //   created_at: {
-          //     [Op.between]: [startDate.toDate(), endDate.toDate()]
-          //   }
-          // };
-          
-          // if (columns.length > 0) {
-          //   // 如果存在type字段，只统计类型为'draft'的记录
-          //   draftWhereCondition.type = 'draft';
-          // }
-          
-
-          totalDraft = await Contract.count({
-            where:  
-            // draftWhereCondition
-            {
-              created_at: {
-                [Op.between]: [startDate.toDate(), endDate.toDate()]
-              }
-            }
-          });
-          
-          const todayStart = moment().startOf('day');
-          const todayEnd = moment().endOf('day');
-          
-//  let todayDraftCondition = {
-//             created_at: {
-//               [Op.between]: [todayStart.toDate(), todayEnd.toDate()]
-//             }
-//           };
-          
-//           if (columns.length > 0) {
-//             // 如果存在type字段，只统计类型为'draft'的记录
-//             todayDraftCondition.type = 'draft';
-//           }
-          
-
-          todayDraft = await Contract.count({
-            where: 
-            // todayDraftCondition
-            {
-              created_at: {
-                [Op.between]: [todayStart.toDate(), todayEnd.toDate()]
-              }
-            }
-          });
-        } catch (error) {
-          console.log('查询contracts表失败:', error.message);
+      const todayStart = moment().startOf('day');
+      const todayEnd = moment().endOf('day');
+      
+      todayReview = await Contract.count({
+        where: {
+          contract_type: 'review',
+          created_at: {
+            [Op.between]: [todayStart.toDate(), todayEnd.toDate()]
+          }
         }
-      } else {
-        console.log('contracts表不存在');
-      }
+      });
+      
+      // 合同起草数据：从 contracts 表查 contract_type = 'draft'
+      draftData = await sequelize.query(`
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM contracts 
+        WHERE created_at BETWEEN ? AND ? 
+          AND contract_type = 'draft'
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at)
+      `, {
+        replacements: [startDate.toDate(), endDate.toDate()],
+        type: sequelize.QueryTypes.SELECT
+      });
+      
+      totalDraft = await Contract.count({
+        where: {
+          contract_type: 'draft',
+          created_at: {
+            [Op.between]: [startDate.toDate(), endDate.toDate()]
+          }
+        }
+      });
+      
+      todayDraft = await Contract.count({
+        where: {
+          contract_type: 'draft',
+          created_at: {
+            [Op.between]: [todayStart.toDate(), todayEnd.toDate()]
+          }
+        }
+      });
       
     } catch (error) {
-      console.log('检查表失败:', error.message);
+      console.error('查询统计数据失败:', error.message);
     }
 
     console.log('查询结果:', {

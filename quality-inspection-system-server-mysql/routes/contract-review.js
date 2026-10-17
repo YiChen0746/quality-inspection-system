@@ -395,7 +395,8 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         file_path: filePath,
         file_size: req.file.size,
         content: contractContent,
-        user_id: req.session?.user?.id || null
+        user_id: req.session?.user?.id || null,
+        contract_type: 'review'
       });
 
       // 解析分析结果并保存

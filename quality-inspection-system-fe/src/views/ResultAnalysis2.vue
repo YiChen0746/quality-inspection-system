@@ -56,6 +56,15 @@ export default {
     this.renderReviewChart();
     this.renderDraftChart();
   },
+  // keep-alive 下每次切回页面都刷新数据，确保审查/起草后统计是最新的
+  async activated() {
+    await this.fetchStatisticsData();
+    this.updateCardData();
+    if (this.reviewChart) this.reviewChart.destroy();
+    if (this.draftChart) this.draftChart.destroy();
+    this.renderReviewChart();
+    this.renderDraftChart();
+  },
   methods: {
     // 从API获取统计数据
     async fetchStatisticsData() {
