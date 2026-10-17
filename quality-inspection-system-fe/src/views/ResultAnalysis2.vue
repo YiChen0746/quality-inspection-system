@@ -24,6 +24,7 @@
 <script>
 import Chart from 'chart.js/auto';
 import { ElMessage } from 'element-plus';
+import { getAuthHeaders } from '@Setup/storage/user.js';
 
 export default {
   data() {
@@ -64,7 +65,8 @@ export default {
         const response = await fetch('/api/contract_statistics?days=30', {
           method: 'GET',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
           }
         });
 

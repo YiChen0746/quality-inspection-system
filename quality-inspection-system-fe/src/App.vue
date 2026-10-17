@@ -76,6 +76,8 @@ const logoutHandler = async () => {
       removeUserInfo();
       data.isLogin = false;
       ElMessage({ message: '退出成功！', type: 'success' });
+      // 退出后回到首页，避免停留在需要登录的页面
+      router.push('/knowledge_promotion');
     } else {
       ElMessage.error('网络出错啦！请稍后再试 ~');
     }
