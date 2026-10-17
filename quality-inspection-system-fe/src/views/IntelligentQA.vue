@@ -1,24 +1,19 @@
 <template>
-  <div class="IntelligentQA">
+  <div class="intelligent-qa">
     <!-- 左侧历史会话侧边栏 -->
-    <div class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+    <div class="sidebar">
       <div class="sidebar-header">
         <button class="new-chat-btn" @click="startNewChat">
           <svg class="plus-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
-          <span v-if="!sidebarCollapsed">新对话</span>
-        </button>
-        <button class="toggle-btn" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? '展开' : '收起'">
-          <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path :d="sidebarCollapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <span>新对话</span>
         </button>
       </div>
 
-      <div class="session-list" v-if="!sidebarCollapsed">
+      <div class="session-list-wrap">
         <div class="session-title">历史会话</div>
-        <el-scrollbar height="calc(100vh - 140px)">
+        <div class="session-list">
           <div
             v-for="session in sessions"
             :key="session.id"
@@ -43,64 +38,58 @@
           <div v-if="sessions.length === 0" class="empty-sessions">
             暂无历史会话
           </div>
-        </el-scrollbar>
+        </div>
       </div>
     </div>
 
     <!-- 右侧聊天区 -->
     <div class="chat-main">
-      <div class="chat-header" v-if="!sidebarCollapsed">
+      <div class="chat-header">
         <span class="header-title">{{ currentSessionTitle || '智能法务助手' }}</span>
       </div>
 
-      <div class="chat-list-container">
-        <el-scrollbar ref="chatScrollRef">
-          <Message 
-            v-if="!currentSessionId"
-            :avatar="bot" 
-            message="你好，我是智能法务助理，专门为您解答法律相关问题。有什么法律问题就来问我吧 ~"
-            :loading="false"
-          ></Message>
-          <Message 
-            v-for="(message, index) in data.messageList" 
-            :key="index" 
-            :avatar="message.type" 
-            :message="message.content"
-            :loading="message.loading"
-          ></Message>
-        </el-scrollbar>
+      <div class="chat-list">
+        <Message 
+          v-if="!currentSessionId"
+          :avatar="bot" 
+          message="你好，我是智能法务助理，专门为您解答法律相关问题。有什么法律问题就来问我吧 ~"
+          :loading="false"
+        ></Message>
+        <Message 
+          v-for="(message, index) in data.messageList" 
+          :key="index" 
+          :avatar="message.type" 
+          :message="message.content"
+          :loading="message.loading"
+        ></Message>
       </div>
 
-      <div class="message-post-container">
-        <div class="input-wrapper">
-          <div class="textarea-container">
-            <textarea
-              v-model="data.questionMessage"
-              class="custom-textarea"
-              placeholder="请输入您的法律问题，按 Enter 发送..."
-              @keydown="handleKeyDown"
-              :disabled="data.isLoading"
-              rows="1"
-              ref="textareaRef"
-              @input="adjustTextareaHeight"
-            ></textarea>
-            <button 
-              @click="onSubmit" 
-              class="send-button"
-              :class="{ 'loading': data.isLoading, 'disabled': !data.questionMessage.trim() || data.isLoading }"
-              :disabled="!data.questionMessage.trim() || data.isLoading"
-            >
-              <div class="button-content">
-                <svg v-if="!data.isLoading" class="send-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <div v-else class="loading-spinner">
-                  <div class="spinner"></div>
-                </div>
-              </div>
-            </button>
-          </div>
+      <div class="chat-input-area">
+        <div class="input-box">
+          <textarea
+            v-model="data.questionMessage"
+            class="input-textarea"
+            placeholder="请输入您的法律问题，按 Enter 发送..."
+            @keydown="handleKeyDown"
+            :disabled="data.isLoading"
+            rows="1"
+            ref="textareaRef"
+            @input="adjustTextareaHeight"
+          ></textarea>
+          <button 
+            @click="onSubmit" 
+            class="send-btn"
+            :class="{ 'loading': data.isLoading, 'disabled': !data.questionMessage.trim() || data.isLoading }"
+            :disabled="!data.questionMessage.trim() || data.isLoading"
+          >
+            <svg v-if="!data.isLoading" class="send-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div v-else class="loading-spinner">
+              <div class="spinner"></div>
+            </div>
+          </button>
         </div>
       </div>
     </div>
@@ -109,7 +98,6 @@
 
 <script setup lang="ts">
 import { reactive, ref, nextTick, onMounted } from 'vue'
-import { Service } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus';
 import Message from '@/components/Message/index.vue';
 import {
@@ -139,8 +127,6 @@ const data = reactive({
 
 const bot = 'bot';
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
-const chatScrollRef = ref<any>(null);
-const sidebarCollapsed = ref(false);
 const sessions = ref<ChatSessionItem[]>([]);
 const currentSessionId = ref<number | null>(null);
 const currentSessionTitle = ref('');
@@ -157,14 +143,13 @@ const adjustTextareaHeight = async () => {
 };
 
 // 滚动到底部
-const scrollToBottom = async () => {
-  await nextTick();
-  if (chatScrollRef.value) {
-    const scrollbar = chatScrollRef.value;
-    if (scrollbar.setScrollTop) {
-      scrollbar.setScrollTop(99999);
+const scrollToBottom = () => {
+  nextTick(() => {
+    const chatList = document.querySelector('.chat-list');
+    if (chatList) {
+      chatList.scrollTop = chatList.scrollHeight;
     }
-  }
+  });
 };
 
 // 处理键盘事件
@@ -232,7 +217,6 @@ const handleDeleteSession = async (sessionId: number) => {
   try {
     await deleteChatSession(sessionId);
     ElMessage.success('删除成功');
-    // 如果删除的是当前会话，清空聊天区
     if (currentSessionId.value === sessionId) {
       startNewChat();
     }
@@ -301,7 +285,6 @@ const onSubmit = async () => {
         };
         data.isLoading = false;
         scrollToBottom();
-        // 刷新会话列表（因为可能新建了会话或更新了标题）
         await loadSessions();
       },
       onError: (error: Error) => {
@@ -327,52 +310,41 @@ const onSubmit = async () => {
 
 onMounted(() => {
   loadSessions();
+  adjustTextareaHeight();
 });
 </script>
 
-<style lang="less">
-.IntelligentQA{
+<style scoped>
+.intelligent-qa {
   height: calc(100vh - 60px);
-  background-color: #dff9f8;
   display: flex;
-  flex: 1;
+  background-color: #f5f7fa;
   overflow: hidden;
-  position: relative;
 }
 
-/* ========== 侧边栏 ========== */
+/* ========== 侧边栏（白色主题） ========== */
 .sidebar {
   width: 260px;
   min-width: 260px;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease, min-width 0.3s ease;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-
-  &.collapsed {
-    width: 60px;
-    min-width: 60px;
-  }
+  flex-shrink: 0;
 }
 
 .sidebar-header {
   padding: 16px 12px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .new-chat-btn {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 10px 12px;
-  background: linear-gradient(135deg, #0A9AAE, #0891b2);
+  background: #0A9AAE;
   color: white;
   border: none;
   border-radius: 10px;
@@ -380,56 +352,40 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 500;
   transition: all 0.2s ease;
-
-  &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(10, 154, 174, 0.4);
-  }
-
-  .plus-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-  }
 }
 
-.toggle-btn {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.1);
-  color: #a0a0b0;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
+.new-chat-btn:hover {
+  background: #0891b2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(10, 154, 174, 0.3);
+}
+
+.plus-icon {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  transition: all 0.2s ease;
+}
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.15);
-    color: #fff;
-  }
+.session-list-wrap {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 
-  .toggle-icon {
-    width: 16px;
-    height: 16px;
-  }
+.session-title {
+  padding: 12px 16px 8px;
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .session-list {
   flex: 1;
-  overflow: hidden;
-  padding: 12px 0;
-}
-
-.session-title {
-  padding: 0 16px 8px;
-  font-size: 12px;
-  color: #808090;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
 }
 
 .session-item {
@@ -437,70 +393,80 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  margin: 2px 8px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  position: relative;
+  margin-bottom: 2px;
+}
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.08);
-  }
+.session-item:hover {
+  background: #f3f4f6;
+}
 
-  &.active {
-    background: rgba(10, 154, 174, 0.2);
-    color: #0A9AAE;
-  }
+.session-item.active {
+  background: #ecfeff;
+  color: #0A9AAE;
+}
 
-  .session-icon {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-  }
+.session-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #9ca3af;
+}
 
-  .session-name {
-    flex: 1;
-    font-size: 13px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+.session-item.active .session-icon {
+  color: #0A9AAE;
+}
 
-  .delete-btn {
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    color: #808090;
-    cursor: pointer;
-    border-radius: 4px;
-    opacity: 0;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
+.session-name {
+  flex: 1;
+  font-size: 13px;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-    svg {
-      width: 14px;
-      height: 14px;
-    }
+.session-item.active .session-name {
+  color: #0A9AAE;
+  font-weight: 500;
+}
 
-    &:hover {
-      background: rgba(255, 80, 80, 0.2);
-      color: #ff6b6b;
-    }
-  }
+.delete-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
 
-  &:hover .delete-btn {
-    opacity: 1;
-  }
+.delete-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.delete-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.session-item:hover .delete-btn {
+  opacity: 1;
 }
 
 .empty-sessions {
-  padding: 20px;
+  padding: 24px 16px;
   text-align: center;
-  color: #606070;
+  color: #9ca3af;
   font-size: 13px;
 }
 
@@ -509,158 +475,119 @@ onMounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  overflow: hidden;
+  min-width: 0;
 }
 
 .chat-header {
-  width: 100%;
-  padding: 12px 24px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  .header-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: #1a1a2e;
-  }
+  padding: 14px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: center;
 }
 
-.chat-list-container{
+.header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px;
+  max-width: 900px;
+  margin: 0 auto;
   width: 100%;
-  max-width: 850px;
-  height: calc(100vh - 180px);
-  min-height: calc(100vh - 180px);
-  margin-bottom: -10px;
-  overflow: hidden;
-  scroll-behavior: smooth;
-  margin-top: 20px;
-  padding: 0 20px;
   box-sizing: border-box;
 }
 
-.message-post-container {
-  padding: 0;
-  margin-bottom: 20px;
-  width: 100%;
-  max-width: 750px;
+.chat-input-area {
+  padding: 16px 20px 24px;
+  background: #f5f7fa;
 }
 
-.input-wrapper {
+.input-box {
+  position: relative;
+  max-width: 750px;
+  margin: 0 auto;
   background: #ffffff;
   border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   border: 2px solid transparent;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-  backdrop-filter: blur(10px);
-
-  &:hover {
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
-    border-color: rgba(10, 154, 174, 0.2);
-  }
-
-  &:focus-within {
-    box-shadow: 0 16px 48px rgba(10, 154, 174, 0.15);
-    border-color: #0A9AAE;
-    transform: translateY(-2px);
-  }
+  transition: all 0.3s ease;
 }
 
-.textarea-container {
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 16px 20px;
-  gap: 16px;
+.input-box:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  border-color: rgba(10, 154, 174, 0.2);
 }
 
-.custom-textarea {
-  flex: 1;
+.input-box:focus-within {
+  box-shadow: 0 8px 24px rgba(10, 154, 174, 0.15);
+  border-color: #0A9AAE;
+}
+
+.input-textarea {
+  width: 100%;
   border: none;
   outline: none;
   resize: none;
   font-size: 15px;
   line-height: 1.5;
-  color: #2c3e50;
+  color: #1f2937;
   background: transparent;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding: 16px 60px 16px 20px;
   min-height: 24px;
   max-height: 96px;
   overflow-y: auto;
-  transition: all 0.2s ease;
-
-  &::placeholder {
-    color: #94a3b8;
-    font-weight: 400;
-  }
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.send-button {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+.input-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.input-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.send-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   border: none;
-  background: linear-gradient(135deg, #0A9AAE 0%, #0891b2 100%);
+  background: #0A9AAE;
   color: white;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 12px rgba(10, 154, 174, 0.3);
-  position: relative;
-  overflow: hidden;
-
-  &:hover:not(.disabled) {
-    transform: translateY(-2px) scale(1.05);
-    box-shadow: 0 8px 20px rgba(10, 154, 174, 0.4);
-  }
-
-  &:active:not(.disabled) {
-    transform: translateY(0) scale(0.98);
-    transition: all 0.1s ease;
-  }
-
-  &.disabled {
-    background: #e2e8f0;
-    color: #94a3b8;
-    cursor: not-allowed;
-    box-shadow: none;
-    transform: none;
-  }
-
-  &.loading {
-    background: linear-gradient(135deg, #0A9AAE 0%, #0891b2 100%);
-    cursor: not-allowed;
-  }
+  transition: all 0.2s ease;
 }
 
-.button-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
+.send-btn:hover:not(.disabled) {
+  background: #0891b2;
+  transform: scale(1.05);
+}
+
+.send-btn.disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}
+
+.send-btn.loading {
+  background: #0A9AAE;
+  cursor: not-allowed;
 }
 
 .send-icon {
-  width: 20px;
-  height: 20px;
-  transition: all 0.3s ease;
-}
-
-.send-button:hover:not(.disabled) .send-icon {
-  transform: translateX(2px) translateY(-2px);
+  width: 18px;
+  height: 18px;
 }
 
 .loading-spinner {
@@ -670,8 +597,8 @@ onMounted(() => {
 }
 
 .spinner {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-top: 2px solid white;
   border-radius: 50%;
@@ -683,56 +610,10 @@ onMounted(() => {
   100% { transform: rotate(360deg); }
 }
 
-/* 滚动条样式 */
-.custom-textarea::-webkit-scrollbar {
-  width: 4px;
-}
-
-.custom-textarea::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-textarea::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 2px;
-}
-
-.custom-textarea::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-/* 响应式设计 */
+/* 响应式 */
 @media (max-width: 768px) {
-  .sidebar {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 100;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-
-    &:not(.collapsed) {
-      transform: translateX(0);
-    }
-  }
-
-  .message-post-container {
-    margin: 0 16px 20px;
-  }
-  
-  .textarea-container {
-    padding: 12px 16px;
-  }
-  
-  .send-button {
-    width: 40px;
-    height: 40px;
-  }
-  
-  .send-icon {
-    width: 18px;
-    height: 18px;
+  .chat-input-area {
+    padding: 12px 16px 20px;
   }
 }
 </style>
