@@ -11,6 +11,7 @@ const contractReviewAPI = require('./contract-review');
 const deepseekProxyAPI = require('./deepseek-proxy');
 const featuresAPI = require('./features');
 const chatSessionAPI = require('./chat-session');
+const multiAgentAPI = require('./multi-agent');
 const auth = require('../middleware/auth');
 const multer = require('multer');
 
@@ -109,6 +110,9 @@ router.post('/generate_contract', contractDraftAPI.generateContract);
 router.post('/export_contract_docx', contractDraftAPI.exportContractDocx);
 router.post('/export_contract_pdf', contractDraftAPI.exportContractPdf);
 router.get('/contract_templates', contractDraftAPI.getContractTemplates);
+
+// ================= 多智能体合同审查（核心角色—元角色 / 动态检索 / 全链条终审） ================
+router.use('/multi-agent', multiAgentAPI);
 
 // ================= 扩展功能（到期提醒/风险评分/统计面板/批量上传） ================
 // 即将到期合同

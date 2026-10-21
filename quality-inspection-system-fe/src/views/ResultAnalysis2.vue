@@ -9,13 +9,17 @@
     </div>
 
     <div class="chart-container">
-      <div class="chart" style="flex-grow: 1; min-height: 400px;">
+      <div class="chart">
         <h3 style="margin-top: 0;">合同审查统计</h3>
-        <canvas id="reviewChart" style="height: 100%; width: 100%;"></canvas>
+        <div class="chart-body">
+          <canvas ref="reviewCanvas"></canvas>
+        </div>
       </div>
-      <div class="chart" style="flex-grow: 1; min-height: 400px;">
+      <div class="chart">
         <h3>合同起草统计</h3>
-        <canvas id="draftChart" style="height: 100%; width: 100%;"></canvas>
+        <div class="chart-body">
+          <canvas ref="draftCanvas"></canvas>
+        </div>
       </div>
     </div>
   </div>
@@ -53,6 +57,7 @@ export default {
   async mounted() {
     await this.fetchStatisticsData();
     this.updateCardData();
+    await this.$nextTick();
     this.renderReviewChart();
     this.renderDraftChart();
   },
@@ -60,12 +65,30 @@ export default {
   async activated() {
     await this.fetchStatisticsData();
     this.updateCardData();
-    if (this.reviewChart) this.reviewChart.destroy();
-    if (this.draftChart) this.draftChart.destroy();
+    await this.$nextTick();
+    this.destroyCharts();
     this.renderReviewChart();
     this.renderDraftChart();
   },
+  beforeUnmount() {
+    this.destroyCharts();
+  },
   methods: {
+    destroyCharts() {
+      if (this.reviewChart) {
+        this.reviewChart.destroy();
+        this.reviewChart = null;
+      }
+      if (this.draftChart) {
+        this.draftChart.destroy();
+        this.draftChart = null;
+      }
+    },
+    // 取画布；画布必须仍在文档中，否则跳过绘制
+    getCanvas(refName) {
+      const canvas = this.$refs[refName];
+      return canvas && canvas.isConnected ? canvas : null;
+    },
     // 从API获取统计数据
     async fetchStatisticsData() {
       try {
@@ -118,15 +141,20 @@ export default {
 
     // 渲染合同审查统计图表
     renderReviewChart() {
-      const ctx = document.getElementById('reviewChart').getContext('2d');
-      const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+      const canvas = this.getCanvas('reviewCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 360);
       gradient.addColorStop(0, 'rgba(220, 53, 69, 0.4)');
       gradient.addColorStop(1, 'rgba(220, 53, 69, 0)');
 
       // 销毁旧图表
       if (this.reviewChart) {
         this.reviewChart.destroy();
+        this.reviewChart = null;
       }
+      const staleReview = Chart.getChart(canvas);
+      if (staleReview) staleReview.destroy();
 
       this.reviewChart = new Chart(ctx, {
         type: 'line',
@@ -151,6 +179,8 @@ export default {
           ],
         },
         options: {
+          // 关闭动画：避免销毁旧实例后仍有动画帧绘制已置空的画布，导致整个渲染队列报错中断
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -212,15 +242,20 @@ export default {
 
     // 渲染合同起草统计图表
     renderDraftChart() {
-      const ctx = document.getElementById('draftChart').getContext('2d');
-      const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+      const canvas = this.getCanvas('draftCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 360);
       gradient.addColorStop(0, 'rgba(40, 167, 69, 0.4)');
       gradient.addColorStop(1, 'rgba(40, 167, 69, 0)');
 
       // 销毁旧图表
       if (this.draftChart) {
         this.draftChart.destroy();
+        this.draftChart = null;
       }
+      const staleDraft = Chart.getChart(canvas);
+      if (staleDraft) staleDraft.destroy();
 
       this.draftChart = new Chart(ctx, {
         type: 'line',
@@ -245,6 +280,8 @@ export default {
           ],
         },
         options: {
+          // 关闭动画：避免销毁旧实例后仍有动画帧绘制已置空的画布，导致整个渲染队列报错中断
+          animation: false,
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -348,7 +385,7 @@ body {
 
 .chart-container {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 20px;
   margin: 20px;
 }
@@ -358,7 +395,25 @@ body {
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  height: 450px;
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 画布放在固定高度的定位容器中，避免 Chart.js 自适应循环导致尺寸不断增大 */
+.chart-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chart-body canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .chart h3 {

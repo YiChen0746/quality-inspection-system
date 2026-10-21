@@ -7,7 +7,8 @@ import {
   Edit, 
   PieChart, 
   ChatDotRound, 
-  View 
+  View,
+  Cpu
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus';
 import { getUserInfo, removeUserInfo, setUserInfo } from '@Setup/storage/user.js'
@@ -141,6 +142,10 @@ const logoutHandler = async () => {
               <el-menu-item  :disabled="!data.isLogin"    index="/contract-review" >
                 <el-icon><View /></el-icon>
                 <span>合同审查</span>
+              </el-menu-item>
+              <el-menu-item  :disabled="!data.isLogin"    index="/multi-agent" >
+                <el-icon><Cpu /></el-icon>
+                <span>多智能体审查</span>
               </el-menu-item>
 
               <!-- <el-menu-item   :disabled="!data.isLogin"      index="/editword" >

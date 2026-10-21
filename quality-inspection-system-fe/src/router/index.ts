@@ -58,6 +58,11 @@ const router = createRouter({
       path: '/contract-draft',
       name: 'ContractDraft',
       component: () => import('../views/ContractDraft.vue')
+    },
+    {
+      path: '/multi-agent',
+      name: 'MultiAgentReview',
+      component: () => import('../views/MultiAgentReview.vue')
     }
 
   ]

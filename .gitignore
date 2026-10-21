@@ -39,7 +39,10 @@ lerna-debug.log*
 .tmp
 
 # 用户上传文件（含真实合同/病例数据，不发布，程序运行时会自动创建目录）
-**/public/uploads/
+**/public/uploads/*
+# 例外：国家市场监督管理总局合同示范文本库的公开样例
+!**/public/uploads/samples/
+!**/public/uploads/samples/*.docx
 
 # 本地保留、不发布的旧版后端
 quality-inspection-system-server/
