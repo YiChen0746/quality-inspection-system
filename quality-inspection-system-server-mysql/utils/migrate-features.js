@@ -53,6 +53,14 @@ async function migrate() {
     `);
     console.log('历史数据 contract_type 初始化完成');
 
+    // quality_results 文本字段扩容：AI 可能把整段条款写进日期/管辖字段，
+    // 原有 varchar(50)/varchar(100) 会触发 "Data too long" 导致审查结果保存失败
+    await sequelize.query("ALTER TABLE quality_results MODIFY COLUMN effective_date TEXT NULL COMMENT '生效日期'");
+    await sequelize.query("ALTER TABLE quality_results MODIFY COLUMN termination_date TEXT NULL COMMENT '终止日期'");
+    await sequelize.query("ALTER TABLE quality_results MODIFY COLUMN jurisdiction TEXT NULL COMMENT '管辖权'");
+    await sequelize.query("ALTER TABLE quality_results MODIFY COLUMN contract_type VARCHAR(255) NULL COMMENT '合同类型'");
+    console.log('quality_results 文本字段扩容完成');
+
     console.log('迁移完成！');
     process.exit(0);
   } catch (error) {

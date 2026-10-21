@@ -459,11 +459,14 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
           contract_summary: contractSummary,
           risk_clauses: riskClauses,
           core_clauses: coreClauses,
-          analysis_position: analysis_position
+          analysis_position: analysis_position,
+          // 回传识别出的正文，供“转深度审查”直接带入多智能体页面
+          contract_content: contractContent
         }
       }) + '\n');
 
     } catch (error) {
+      console.error('合同审查分析或结果保存失败:', error);
       res.write(JSON.stringify({
         err_code: 500,
         step: 'ai_error',

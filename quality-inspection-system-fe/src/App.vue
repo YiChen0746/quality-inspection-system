@@ -139,13 +139,19 @@ const logoutHandler = async () => {
                 <el-icon><ChatDotRound /></el-icon>
                 <span>法务助手</span>
               </el-menu-item>
-              <el-menu-item  :disabled="!data.isLogin"    index="/contract-review" >
+              <el-menu-item  :disabled="!data.isLogin"    index="/contract-review" class="menu-item--two-line" >
                 <el-icon><View /></el-icon>
-                <span>合同审查</span>
+                <span class="menu-label">
+                  <span class="menu-label-main">合同审查</span>
+                  <span class="menu-sub">快速初筛</span>
+                </span>
               </el-menu-item>
-              <el-menu-item  :disabled="!data.isLogin"    index="/multi-agent" >
+              <el-menu-item  :disabled="!data.isLogin"    index="/multi-agent" class="menu-item--two-line" >
                 <el-icon><Cpu /></el-icon>
-                <span>多智能体审查</span>
+                <span class="menu-label">
+                  <span class="menu-label-main">多智能体审查</span>
+                  <span class="menu-sub">深度审查</span>
+                </span>
               </el-menu-item>
 
               <!-- <el-menu-item   :disabled="!data.isLogin"      index="/editword" >
@@ -293,6 +299,31 @@ const logoutHandler = async () => {
 .el-menu-item.is-disabled {
   color: rgba(255, 255, 255, 0.35) !important;
   cursor: not-allowed;
+}
+/* 两行菜单：主标题 + 副标题，避免侧边栏宽度不足导致文字被截断 */
+.el-menu-item.menu-item--two-line {
+  height: auto;
+  min-height: 62px;
+  line-height: 1.35;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.menu-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.menu-label-main {
+  font-size: 15px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.menu-sub {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.62);
 }
 </style>
 

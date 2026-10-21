@@ -361,11 +361,29 @@ export default {
   },
   mounted() {
     this.loadContracts();
+    this.consumeDeepReviewPayload();
   },
   beforeUnmount() {
     this.clearTimers();
   },
   methods: {
+    // 接收快速初筛页面“转深度审查”带过来的正文
+    consumeDeepReviewPayload() {
+      try {
+        const raw = sessionStorage.getItem('deep-review-payload');
+        if (!raw) return;
+        sessionStorage.removeItem('deep-review-payload');
+        const payload = JSON.parse(raw);
+        if (payload && payload.content) {
+          this.form.contractName = payload.name || '';
+          this.form.contractContent = payload.content;
+          ElMessage.success('已带入快速初筛识别出的合同正文，可直接启动深度审查');
+        }
+      } catch (error) {
+        console.warn('读取深度审查入参失败:', error);
+      }
+    },
+
     riskTagType(level) {
       if (level === '低') return 'success';
       if (level === '高') return 'danger';

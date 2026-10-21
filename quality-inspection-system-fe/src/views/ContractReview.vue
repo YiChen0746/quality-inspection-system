@@ -223,6 +223,14 @@
             </div>
             <div class="header-actions">
               <el-button 
+                type="warning" 
+                class="deep-review-btn"
+                @click="goDeepReview"
+              >
+                <el-icon class="btn-icon"><Promotion /></el-icon>
+                <span class="btn-text">转深度审查</span>
+              </el-button>
+              <el-button 
                 type="success" 
                 class="export-btn"
                 @click="exportReport"
@@ -458,13 +466,16 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { getAuthHeaders } from '@Setup/storage/user.js';
 import { 
   Document, Upload, UploadFilled, Check, Loading, Clock,
   CircleCheck, Download, Refresh, ArrowDown, ArrowUp, User,
-  Warning, InfoFilled, Star, Search, View
+  Warning, InfoFilled, Star, Search, View, Promotion
 } from '@element-plus/icons-vue';
+
+const router = useRouter();
 
 // 响应式数据
 const uploadRef = ref();
@@ -924,6 +935,20 @@ const resetAnalysis = () => {
   currentProcessing.value = false;
   analysisPosition.value = '中立';
   ElMessage.success('已重置，可以重新上传文件');
+};
+
+// 把快速初筛识别出的正文带到多智能体页面做深度审查
+const goDeepReview = () => {
+  const content = reviewResult.value?.contract_content;
+  if (!content || !String(content).trim()) {
+    ElMessage.warning('未获取到合同正文，无法转深度审查');
+    return;
+  }
+  sessionStorage.setItem('deep-review-payload', JSON.stringify({
+    name: reviewResult.value?.contract_name || selectedFile.value?.name || '',
+    content: String(content)
+  }));
+  router.push('/multi-agent');
 };
 
 // 网络状态和连接测试

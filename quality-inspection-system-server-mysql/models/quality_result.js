@@ -35,17 +35,17 @@ const QualityResult = sequelize.define('QualityResult', {
     comment: '合同类型'
   },
   effective_date: {
-    type: DataTypes.STRING(50),
+    type: DataTypes.TEXT,
     allowNull: true,
     comment: '生效日期'
   },
   termination_date: {
-    type: DataTypes.STRING(50),
+    type: DataTypes.TEXT,
     allowNull: true,
     comment: '终止日期'
   },
   jurisdiction: {
-    type: DataTypes.STRING(100),
+    type: DataTypes.TEXT,
     allowNull: true,
     comment: '管辖权'
   },
