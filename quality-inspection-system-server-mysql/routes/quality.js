@@ -25,7 +25,7 @@ const getQualityResultHandler = async (req, res) => {
     }
 
     // 获取用户ID（如果有）
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    const userId = req.user?.id || null;
 
     // 检查是否已有分析结果
     const existingResult = await QualityResult.findOne({
@@ -166,7 +166,7 @@ const getQualityResultHandler = async (req, res) => {
 const getAllQualityResults = async (req, res) => {
   try {
     // 获取用户ID（如果有）
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    const userId = req.user?.id || null;
 
     // 查询条件
     const where = {};
@@ -226,7 +226,7 @@ const getAllQualityResults = async (req, res) => {
 const getHospitalList = async (req, res) => {
   try {
     // 获取用户ID（如果有）
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    const userId = req.user?.id || null;
 
     // 查询条件
     const where = {};

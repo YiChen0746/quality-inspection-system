@@ -19,7 +19,7 @@ const analysisByType = async (req, res) => {
     }
 
     // 获取用户ID（如果有）
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    const userId = req.user?.id || null;
 
     // 构建查询条件
     const where = {};

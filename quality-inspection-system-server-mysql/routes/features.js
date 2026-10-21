@@ -25,6 +25,7 @@ const getExpiringContracts = async (req, res) => {
 
     const contracts = await Contract.findAll({
       where: {
+        user_id: req.user?.id || null,
         expiry_date: {
           [Op.not]: null,
           [Op.between]: [today.format('YYYY-MM-DD'), deadline.format('YYYY-MM-DD')]
@@ -137,7 +138,7 @@ ${contractContent.substring(0, 6000)}
       try {
         await Contract.update(
           { risk_score: scoreData.score, risk_level: scoreData.level },
-          { where: { id: contractId } }
+          { where: { id: contractId, user_id: req.user?.id || null } }
         );
       } catch (updateError) {
         console.error('回写风险评分失败:', updateError.message);
@@ -168,16 +169,20 @@ const getDashboardStats = async (req, res) => {
     const today = moment().startOf('day').format('YYYY-MM-DD');
     const thirtyDaysLater = moment().add(30, 'days').endOf('day').format('YYYY-MM-DD');
 
-    const totalContracts = await Contract.count();
+    const ownerId = req.user?.id || null;
+
+    const totalContracts = await Contract.count({ where: { user_id: ownerId } });
 
     const monthNew = await Contract.count({
       where: {
+        user_id: ownerId,
         created_at: { [Op.between]: [monthStart, monthEnd] }
       }
     });
 
     const expiringCount = await Contract.count({
       where: {
+        user_id: ownerId,
         expiry_date: {
           [Op.not]: null,
           [Op.between]: [today, thirtyDaysLater]
@@ -187,13 +192,14 @@ const getDashboardStats = async (req, res) => {
 
     const highRiskCount = await Contract.count({
       where: {
+        user_id: ownerId,
         risk_score: { [Op.gte]: 71 }
       }
     });
 
     const avgResult = await Contract.findOne({
       attributes: [[sequelize.fn('AVG', sequelize.col('risk_score')), 'avgScore']],
-      where: { risk_score: { [Op.not]: null } },
+      where: { user_id: ownerId, risk_score: { [Op.not]: null } },
       raw: true
     });
     const avgRiskScore = avgResult && avgResult.avgScore !== null
@@ -251,7 +257,7 @@ const handleBatchUpload = async (req, res) => {
       });
     }
 
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    const userId = req.user?.id || null;
     const results = [];
 
     for (const file of req.files) {

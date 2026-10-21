@@ -7,8 +7,8 @@ const { Op } = require('sequelize');
 // 获取合同文件列表
 const getContractFiles = async (req, res) => {
   try {
-    // 获取用户ID（如果有）
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    // 获取用户ID（JWT 登录态在 req.user 上）
+    const userId = req.user?.id || null;
 
     // 查询条件
     const where = {};
@@ -100,8 +100,8 @@ const searchContractFiles = async (req, res) => {
   try {
     const { keyword, startDate, endDate, contractType } = req.query;
 
-    // 获取用户ID（如果有）
-    const userId = req.session && req.session.user ? req.session.user.id : null;
+    // 获取用户ID（JWT 登录态在 req.user 上）
+    const userId = req.user?.id || null;
 
     // 查询条件
     const where = {};

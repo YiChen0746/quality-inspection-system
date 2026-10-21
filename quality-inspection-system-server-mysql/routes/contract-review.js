@@ -395,7 +395,7 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         file_path: filePath,
         file_size: req.file.size,
         content: contractContent,
-        user_id: req.session?.user?.id || null,
+        user_id: req.user?.id || null,
         contract_type: 'review'
       });
 
@@ -561,7 +561,8 @@ router.get('/result/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    const result = await QualityResult.findByPk(id, {
+    const result = await QualityResult.findOne({
+      where: { id, user_id: req.user?.id || null },
       include: [
         {
           model: Contract,
@@ -730,6 +731,10 @@ router.get('/history', async (req, res) => {
 
     // 构建查询条件
     const whereClause = {};
+    // 只返回当前账号自己的审查记录
+    if (req.user?.id) {
+      whereClause.user_id = req.user.id;
+    }
     const includeClause = [
       {
         model: Contract,
@@ -833,7 +838,8 @@ router.post('/export_review_report', async (req, res) => {
 
     // 获取审查结果
     console.log('查询数据库，获取审查结果，ID:', numericResultId);
-    const result = await QualityResult.findByPk(numericResultId, {
+    const result = await QualityResult.findOne({
+      where: { id: numericResultId, user_id: req.user?.id || null },
       include: [
         {
           model: Contract,

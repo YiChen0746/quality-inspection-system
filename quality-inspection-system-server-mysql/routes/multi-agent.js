@@ -428,7 +428,8 @@ router.get('/contract_content/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ err_code: 400, message: '合同ID无效' });
 
-    const contract = await Contract.findByPk(id, {
+    const contract = await Contract.findOne({
+      where: { id, user_id: req.user?.id || null },
       attributes: ['id', 'file_name', 'content', 'contract_type']
     });
     if (!contract) return res.status(404).json({ err_code: 404, message: '合同不存在' });
@@ -467,7 +468,10 @@ router.post('/review', async (req, res) => {
   // 支持只传 contractId：从数据库取正文
   if (!content && contractId) {
     try {
-      const contract = await Contract.findByPk(parseInt(contractId), { attributes: ['file_name', 'content'] });
+      const contract = await Contract.findOne({
+        where: { id: parseInt(contractId), user_id: req.user?.id || null },
+        attributes: ['file_name', 'content']
+      });
       if (contract) {
         content = contract.content || '';
         name = name || contract.file_name || '';
