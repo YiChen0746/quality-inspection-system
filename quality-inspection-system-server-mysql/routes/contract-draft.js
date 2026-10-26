@@ -789,6 +789,75 @@ ${suggestionList}
   }
 };
 
+// ==================== 合同专家智能体（Phase 2） ====================
+// 8 类合同专家 persona：每类专家只精通自己的合同领域，深知新手小白易踩的坑
+const EXPERT_PERSONAS = {
+  '买卖合同': { icon: '🛒', focus: '标的物质量标准、交付验收、所有权转移、瑕疵担保、违约金' },
+  '租赁合同': { icon: '🏠', focus: '房屋交付状态、维修责任划分、押金退还条件、转租限制、提前解约' },
+  '劳务合同': { icon: '👷', focus: '工作内容边界、劳务报酬结算、人身安全责任、保险购置、工伤处理' },
+  '服务合同': { icon: '🛠️', focus: '服务标准与验收、付款节点、知识产权归属、保密义务、售后责任' },
+  '借款合同': { icon: '💰', focus: '借款利率合规（LPR上限）、还款方式、逾期责任、担保措施、资金用途' },
+  '委托合同': { icon: '📋', focus: '委托权限范围、费用承担、报告义务、转委托限制、解除条件' },
+  '仓储合同': { icon: '📦', focus: '货物验收标准、仓储条件、损耗责任、出入库流程、仓储费结算' },
+  '建设工程合同': { icon: '🏗️', focus: '工程质量标准、工期延误责任、进度款支付、验收流程、质保金' }
+};
+
+// POST /api/contract_expert_generate
+// body: { contractType?, description, contractForm? }
+// 用户口述一大段需求，对应类型专家生成结构完整、保护新手权益的合同初稿
+const expertGenerate = async (req, res) => {
+  try {
+    const { contractType = '', description = '', contractForm = {} } = req.body;
+
+    if (!description || String(description).trim().length < 10) {
+      return res.status(400).json({ err_code: 400, message: '请用至少一句话描述你的需求（如：我想把朝阳区一套两居室租给一个上班族，月租3500，押一付三）' });
+    }
+
+    // 未选类型时由 LLM 推断合同类型
+    let type = contractType;
+    if (!EXPERT_PERSONAS[type]) {
+      const typeList = Object.keys(EXPERT_PERSONAS).join('、');
+      const inferred = await callLLM(
+        `用户需求描述：${String(description).slice(0, 500)}\n\n请从以下合同类型中选出最匹配的一个，只输出类型名称本身（不要解释、不要标点）：${typeList}`,
+        { maxTokens: 20, temperature: 0.1 }
+      );
+      type = EXPERT_PERSONAS[inferred?.trim()] ? inferred.trim() : '服务合同';
+    }
+
+    const persona = EXPERT_PERSONAS[type];
+    const partyA = contractForm.partyA || '';
+    const partyB = contractForm.partyB || '';
+
+    const systemPrompt =
+      `你是【${type}起草专家】，一位从业 20 年的资深法务，最擅长帮第一次签合同的新手把关。` +
+      `你起草${type}时会重点保护用户权益，确保以下方面不缺失：${persona.focus}。` +
+      `输出要求：1) 输出完整合同全文（含标题、双方信息、编号条款、落款）；2) 结构规范，条款编号清晰；` +
+      `3) 关键商务数字（金额、日期、比例）若用户未提供，用【请填写：xxx】占位；` +
+      `4) 语言严谨但不晦涩，新手能看懂；5) 只输出合同全文，不要解释、不要 markdown 代码块。`;
+
+    const prompt =
+      `用户需求描述（可能口语化、不完整，你要合理补全常规约定，显式占位缺失的关键信息）：\n${String(description).slice(0, 2000)}\n\n` +
+      (partyA ? `甲方：${partyA}\n` : '') +
+      (partyB ? `乙方：${partyB}\n` : '') +
+      `请以${type}专家身份起草这份合同。`;
+
+    const raw = await callLLM(prompt, { maxTokens: 4000, temperature: 0.4, systemPrompt });
+    if (!raw) {
+      return res.status(504).json({ err_code: 504, message: 'AI 服务繁忙或响应超时，请稍后重试（专家起草约需 30-60 秒）' });
+    }
+
+    const contractText = raw.replace(/^```[a-z]*\s*/im, '').replace(/```\s*$/m, '').trim();
+
+    return res.status(200).json({
+      err_code: 0,
+      data: { contractText, contractType: type, expertIcon: persona.icon }
+    });
+  } catch (error) {
+    console.error('[expert-generate] error:', error);
+    return res.status(500).json({ err_code: 500, message: '服务器错误，请稍后重试' });
+  }
+};
+
 module.exports = {
   generateContract,
   exportContractDocx,
@@ -796,5 +865,6 @@ module.exports = {
   getContractTemplates,
   getGuidance,
   getAutocomplete,
-  reviseContract
+  reviseContract,
+  expertGenerate
 };

@@ -28,6 +28,48 @@
 
       <!-- 中间：表单填写 -->
       <div class="form-section">
+        <!-- 专家一键起草卡片 -->
+        <div class="expert-card">
+          <div class="expert-header">
+            <span class="expert-title">🤖 不知道怎么写？专家帮你一键起草</span>
+            <span class="expert-sub">用大白话说清楚你的需求就行，支持语音输入</span>
+          </div>
+          <div class="expert-body">
+            <div class="expert-type-row">
+              <select v-model="expertForm.contractType" class="expert-type-select">
+                <option value="">🎯 AI 自动识别合同类型</option>
+                <option v-for="(p, t) in expertPersonas" :key="t" :value="t">{{ p.icon }} {{ t }}</option>
+              </select>
+            </div>
+            <div class="expert-desc-wrap">
+              <textarea
+                v-model="expertForm.description"
+                class="expert-desc"
+                rows="3"
+                placeholder="例如：我想把朝阳区一套两居室租给一个上班族，月租3500，押一付三，租期一年，物业费我出…"
+              ></textarea>
+              <button
+                v-if="speechSupported"
+                type="button"
+                class="btn-mic"
+                :class="{ recording: isRecording }"
+                :title="isRecording ? '点击停止录音' : '点击开始语音输入'"
+                @click="toggleSpeech"
+              >{{ isRecording ? '⏹ 停止' : '🎙 语音' }}</button>
+            </div>
+            <div v-if="speechInterim" class="speech-interim">🎤 {{ speechInterim }}</div>
+            <button
+              type="button"
+              class="btn-expert-generate"
+              :disabled="isExpertGenerating"
+              @click="expertGenerate"
+            >
+              <span v-if="isExpertGenerating">{{ expertIcon }} 专家起草中…（约 30-60 秒）</span>
+              <span v-else>⚡ 专家一键生成合同初稿</span>
+            </button>
+          </div>
+        </div>
+
         <h3>填写合同信息</h3>
         <form @submit.prevent="generateContract" class="contract-form">
           <div class="form-group" :class="{ focused: activeField === 'contractName' }">
@@ -528,6 +570,25 @@ export default {
       reviseRound: 0,           // 已完成的修改轮次
       reviseHistory: [],        // 每轮记录 { round, mode, applied, summary }
 
+      // ============ 专家一键起草（Phase 2） ============
+      expertPersonas: {
+        '买卖合同': { icon: '🛒' },
+        '租赁合同': { icon: '🏠' },
+        '劳务合同': { icon: '👷' },
+        '服务合同': { icon: '🛠️' },
+        '借款合同': { icon: '💰' },
+        '委托合同': { icon: '📋' },
+        '仓储合同': { icon: '📦' },
+        '建设工程合同': { icon: '🏗️' }
+      },
+      expertForm: { contractType: '', description: '' },
+      isExpertGenerating: false,
+      expertIcon: '🤖',
+      speechSupported: false,
+      isRecording: false,
+      speechInterim: '',
+      recognition: null,
+
       // ============ 起草指引 & 自动补全 ============
       activeField: '',
       showSuggestions: false,
@@ -561,8 +622,118 @@ export default {
     this.loadHistoryFromStorage();
     // 首次加载默认指引
     this.$nextTick(() => this.fetchGuidance('contractName'));
+    // 初始化语音识别（Chrome/Edge 的 Web Speech API）
+    this.initSpeech();
   },
   methods: {
+    // ==================== 专家一键起草（Phase 2） ====================
+
+    // 初始化 Web Speech API 语音识别
+    initSpeech() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { this.speechSupported = false; return; }
+      this.speechSupported = true;
+      const rec = new SR();
+      rec.lang = 'zh-CN';
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.onresult = (event) => {
+        let final = '';
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) final += t;
+          else interim += t;
+        }
+        if (final) {
+          // 最终结果追加到描述框
+          const cur = (this.expertForm.description || '').trimEnd();
+          this.expertForm.description = cur ? cur + final : final;
+          this.speechInterim = '';
+        } else {
+          this.speechInterim = interim;
+        }
+      };
+      rec.onend = () => {
+        this.isRecording = false;
+        this.speechInterim = '';
+      };
+      rec.onerror = (e) => {
+        this.isRecording = false;
+        this.speechInterim = '';
+        if (e.error === 'not-allowed') {
+          ElMessage.error('麦克风权限被拒绝，请在浏览器地址栏允许麦克风访问');
+        } else if (e.error !== 'aborted') {
+          ElMessage.warning('语音识别异常：' + e.error);
+        }
+      };
+      this.recognition = rec;
+    },
+
+    toggleSpeech() {
+      if (!this.recognition) return;
+      if (this.isRecording) {
+        this.recognition.stop();
+        this.isRecording = false;
+      } else {
+        try {
+          this.recognition.start();
+          this.isRecording = true;
+        } catch (e) {
+          // start 在运行中重复调用会抛错，忽略
+        }
+      }
+    },
+
+    async expertGenerate() {
+      if (!this.expertForm.description || this.expertForm.description.trim().length < 10) {
+        ElMessage.warning('请先用一句话描述你的需求（说清楚：谁、做什么、多少钱、什么条件）');
+        return;
+      }
+      this.isExpertGenerating = true;
+      this.expertIcon = this.expertForm.contractType
+        ? (this.expertPersonas[this.expertForm.contractType]?.icon || '🤖')
+        : '🎯';
+      try {
+        const response = await fetch('/api/contract_expert_generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            contractType: this.expertForm.contractType,
+            description: this.expertForm.description,
+            contractForm: this.contractForm
+          })
+        });
+        const data = await response.json();
+        if (data.err_code === 0) {
+          const { contractText, contractType } = data.data;
+          // 初稿填入预览区，并回填表单便于继续精修
+          this.currentContract = {
+            ...(this.currentContract || {}),
+            contractName: this.contractForm.contractName || `${contractType}（AI 起草）`,
+            contractContent: contractText
+          };
+          this.activeTab = 'preview';
+          if (!this.contractForm.description) this.contractForm.description = this.expertForm.description;
+          if (!this.contractForm.contractType && contractType) this.contractForm.contractType = contractType;
+          this.contractHistory.unshift({
+            name: this.currentContract.contractName,
+            content: contractText,
+            time: new Date().toLocaleString()
+          });
+          this.saveHistoryToStorage();
+          ElMessage.success(`${contractType}专家已生成初稿，可在预览区查看修改，或继续风险评估`);
+        } else {
+          ElMessage.error(data.message || '专家起草失败，请稍后重试');
+        }
+      } catch (error) {
+        console.error('专家起草失败:', error);
+        ElMessage.error('网络错误，请稍后重试');
+      } finally {
+        this.isExpertGenerating = false;
+      }
+    },
+
     // 加载合同模板
     async loadTemplates() {
       try {
@@ -1521,6 +1692,98 @@ export default {
 .score-detail li {
   margin-bottom: 2px;
 }
+
+/* ============ 专家一键起草卡片 ============ */
+.expert-card {
+  margin-bottom: 20px;
+  border: 1px solid #d9ecff;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f5f9ff 0%, #f0fdf4 100%);
+  overflow: hidden;
+}
+.expert-header {
+  padding: 12px 16px;
+  background: linear-gradient(90deg, #ecf5ff, #f0f9eb);
+  border-bottom: 1px solid #d9ecff;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.expert-title { font-size: 14px; font-weight: 700; color: #303133; }
+.expert-sub { font-size: 12px; color: #909399; }
+.expert-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.expert-type-row { display: flex; }
+.expert-type-select {
+  flex: 1;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #303133;
+  background: white;
+  outline: none;
+}
+.expert-type-select:focus { border-color: #409eff; }
+.expert-desc-wrap { position: relative; }
+.expert-desc {
+  width: 100%;
+  padding: 10px 96px 10px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #303133;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.expert-desc:focus { border-color: #409eff; outline: none; box-shadow: 0 0 0 2px rgba(64,158,255,0.12); }
+.btn-mic {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 6px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 14px;
+  background: white;
+  color: #606266;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-mic:hover { border-color: #409eff; color: #409eff; }
+.btn-mic.recording {
+  background: #fef0f0;
+  border-color: #f56c6c;
+  color: #f56c6c;
+  animation: mic-pulse 1.2s infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,108,108,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245,108,108,0); }
+}
+.speech-interim {
+  font-size: 12px;
+  color: #409eff;
+  background: #ecf5ff;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.btn-expert-generate {
+  align-self: flex-start;
+  padding: 10px 22px;
+  background: linear-gradient(135deg, #409eff, #67c23a);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-expert-generate:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(64,158,255,0.3); }
+.btn-expert-generate:disabled { opacity: 0.65; cursor: not-allowed; }
 
 /* 响应式设计 */
 @media (max-width: 1200px) {
