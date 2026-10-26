@@ -9,16 +9,29 @@ const { Contract } = require('../models');
 const { loadKnowledgeSources, retrieveKnowledge, inferContractCategory } = require('../utils/knowledge-service');
 
 // ==================== 表单环节顺序（指引面板使用） ====================
-// 新手起草合同的标准填写顺序
+// 与前端表单视觉顺序一致（问题清单 #5），第三方字段已纳入（#6）
 const FORM_STEPS = [
-  { key: 'contractName',   label: '合同名称',       desc: '一句话概括合同主题，例如"厂房租赁合同"',     required: true },
-  { key: 'contractType',   label: '合同类型',       desc: '选择合同类别，系统将据此推荐必备条款',        required: false },
-  { key: 'partyA',         label: '甲方（签约方一）', desc: '填写甲方完整名称或姓名',                     required: true },
-  { key: 'partyB',         label: '乙方（签约方二）', desc: '填写乙方完整名称或姓名',                     required: true },
-  { key: 'subject',        label: '合同主体类型',   desc: '选择个人 / 公司 / 其他组织',                  required: true },
+  { key: 'contractName',  label: '合同名称',       desc: '一句话概括合同主题，例如"厂房租赁合同"',       required: true },
+  { key: 'partyA',        label: '甲方（签约方一）', desc: '填写甲方完整名称或姓名',                       required: true },
+  { key: 'partyB',        label: '乙方（签约方二）', desc: '填写乙方完整名称或姓名',                       required: true },
+  { key: 'thirdParty',    label: '第三方',         desc: '如有担保人、中介方等第三方请填写，没有可留空',   required: false },
+  { key: 'subject',       label: '合同主体类型',   desc: '选择个人 / 公司 / 其他组织',                    required: true },
+  { key: 'contractType',  label: '合同类型',       desc: '选择合同类别，系统将据此推荐必备条款',          required: false },
   { key: 'description',   label: '合同主要内容',   desc: '用一段话描述合同标的、权利义务、期限等核心事项', required: true },
-  { key: 'expiryDate',    label: '合同到期日期',   desc: '合同终止日期；无固定期限可留空',               required: false }
+  { key: 'expiryDate',    label: '合同到期日期',   desc: '合同终止日期；无固定期限可留空',                 required: false }
 ];
+
+// 字段级法律语义映射（问题清单 #1/#2）：检索用字段背后的法律概念，而不是字段名
+const FIELD_LEGAL_TOPICS = {
+  contractName: '合同订立 要约承诺 合同成立',
+  partyA:       '签约主体资格 民事行为能力 代理权限 当事人',
+  partyB:       '签约主体资格 民事行为能力 代理权限 当事人',
+  thirdParty:   '第三人 担保 连带责任 中介',
+  subject:      '自然人 法人 非法人组织 民事行为能力',
+  contractType: '有名合同 典型合同 权利义务',
+  description:  '合同内容 标的 价款 履行方式 违约责任',
+  expiryDate:   '履行期限 合同终止 合同解除'
+};
 
 // 复用的统一 LLM 调用工具（同步、最多 3 次重试带退避、失败返回 null）
 // 超时 90s：全文修订要生成数千 token，免费模型（glm-4-flash）速度慢，30s 必超时
@@ -80,22 +93,22 @@ const getGuidance = async (req, res) => {
   try {
     const { currentField, contractForm = {} } = req.body;
 
-    // 1. 推导当前环节索引
+    // 统一的填写判定（问题清单 #10：进度点与下一步用同一标准）
+    const isFilled = (v) => !!String(v || '').trim();
+
+    // 1. 推导当前环节索引；未知字段回退到「第一个未填的必填环节」（#6/#8）
     let currentIdx = FORM_STEPS.findIndex(s => s.key === currentField);
-    if (currentIdx === -1) currentIdx = FORM_STEPS.findIndex(s => !contractForm[s.key]);
+    if (currentIdx === -1) currentIdx = FORM_STEPS.findIndex(s => s.required && !isFilled(contractForm[s.key]));
     if (currentIdx === -1) currentIdx = 0;
 
-    // 2. 推导下一环节（跳到第一个未填且 required 的）
-    let nextIdx = -1;
-    for (let i = 0; i < FORM_STEPS.length; i++) {
-      if (!contractForm[FORM_STEPS[i].key] || String(contractForm[FORM_STEPS[i].key]).trim().length < 2) {
-        nextIdx = i; break;
-      }
-    }
-    if (nextIdx === -1) nextIdx = Math.min(currentIdx + 1, FORM_STEPS.length - 1);
+    // 2. 下一环节只推荐必填项（#8）；全部必填填完进入完成态（#9）
+    const completed = FORM_STEPS.every(s => !s.required || isFilled(contractForm[s.key]));
+    const nextIdx = completed
+      ? -1
+      : FORM_STEPS.findIndex((s, i) => i !== currentIdx && s.required && !isFilled(contractForm[s.key]));
 
     const currentStep = FORM_STEPS[currentIdx];
-    const nextStep    = FORM_STEPS[nextIdx];
+    const nextStep = nextIdx >= 0 ? FORM_STEPS[nextIdx] : null;
 
     // 3. 填写作答提示（LLM 生成，100 字以内中文）
     let hint = currentStep.desc; // fallback 用硬编码 desc
@@ -110,25 +123,31 @@ const getGuidance = async (req, res) => {
     );
     if (llmHint) hint = llmHint;
 
-    // 4. 法条依据（knowledge-service 检索 + LLM 筛选）
+    // 4. 法条依据（字段级法律语义检索，问题清单 #1/#2）
     const kb = await loadKB();
     const contractType = contractForm.contractType || inferContractCategory(contractForm.contractName || '');
-    const query = `${currentStep.label} ${contractType || '合同'} 法律规定 条款 要求`;
+    const topics = FIELD_LEGAL_TOPICS[currentStep.key] || '合同条款';
+    const query = `${topics} ${contractType || '合同'}`;
     const items = retrieveKnowledge(query, kb, 4, contractType);
 
-    // 若检索结果少，尝试扩大查询
+    // 检索不到时放宽条件兜底
     let laws = items.filter(i => i.type === 'law').slice(0, 3);
     if (laws.length < 1) {
-      const items2 = retrieveKnowledge(`${currentStep.label} 合同条款`, kb, 3);
+      const items2 = retrieveKnowledge(topics, kb, 3);
       laws = items2.filter(i => i.type === 'law').slice(0, 3);
     }
 
-    const legalBasis = laws.map(l => ({
-      law: l.title,
-      article: (l.title.match(/第[一二三四五六七八九十百千万\d]+条/) || [''])[0],
-      content: l.content,
-      source: l.source || ''
-    }));
+    // 拆解标题为「法律名 + 条号 + 主题」三部分，前端分开渲染（问题清单 #17）
+    const legalBasis = laws.map(l => {
+      const m = String(l.title).match(/^(.+?)(第[一二三四五六七八九十百千万\d]+条)[：:\s]*(.*)$/);
+      return {
+        law: m ? m[1].trim() : l.title,
+        article: m ? m[2] : '',
+        topic: m && m[3] ? m[3].trim() : '',
+        content: l.content,
+        source: l.source || ''
+      };
+    });
 
     // 5. 给用户的通俗法条摘要（LLM 生成，带书名号）
     let basisSummary = '';
@@ -144,14 +163,16 @@ const getGuidance = async (req, res) => {
       err_code: 0,
       data: {
         currentStep: { ...currentStep, index: currentIdx + 1, total: FORM_STEPS.length },
-        nextStep:    { ...nextStep,    index: nextIdx + 1 },
+        nextStep:    nextStep ? { ...nextStep, index: nextIdx + 1 } : null,
+        completed,
         hint,
         legalBasis,
         basisSummary,
         formProgress: FORM_STEPS.map(s => ({
           key: s.key,
           label: s.label,
-          filled: !!(contractForm[s.key] && String(contractForm[s.key]).trim())
+          required: s.required,
+          filled: isFilled(contractForm[s.key])
         })),
         contractType
       }

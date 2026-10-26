@@ -142,6 +142,7 @@
                 id="subject" 
                 v-model="contractForm.subject"
                 :class="{ error: errors.subject }"
+                @focus="onFieldFocus('subject')"
                 @change="onFieldFocus('subject')"
               >
                 <option value="">请选择合同主体</option>
@@ -154,7 +155,7 @@
 
             <div class="form-group" :class="{ focused: activeField === 'contractType' }">
               <label for="contractType">合同类型</label>
-              <select id="contractType" v-model="contractForm.contractType" @change="onFieldFocus('contractType')">
+              <select id="contractType" v-model="contractForm.contractType" @focus="onFieldFocus('contractType')" @change="onFieldFocus('contractType')">
                 <option value="">请选择合同类型</option>
                 <option value="买卖合同">买卖合同</option>
                 <option value="租赁合同">租赁合同</option>
@@ -174,6 +175,7 @@
               placeholder="请选择合同到期日期"
               value-format="YYYY-MM-DD"
               style="width: 100%"
+              @focus="onFieldFocus('expiryDate')"
               @change="onFieldFocus('expiryDate')"
             />
           </div>
@@ -221,16 +223,18 @@
           <h3>起草指引</h3>
         </div>
 
-        <!-- 环节进度条 -->
+        <!-- 环节进度条（可点击跳转，必填项带 * 标记） -->
         <div class="guidance-progress">
           <div
             v-for="step in guidance.data.formProgress || []"
             :key="step.key"
-            class="progress-node"
+            class="progress-node clickable"
             :class="{ filled: step.filled, active: step.key === guidance.currentKey }"
+            :title="'点击查看「' + step.label + '」的指引'"
+            @click="onFieldFocus(step.key)"
           >
             <span class="progress-dot"></span>
-            <span class="progress-label">{{ step.label }}</span>
+            <span class="progress-label">{{ step.label }}<span v-if="step.required" class="req-mark">*</span></span>
           </div>
         </div>
 
@@ -246,11 +250,20 @@
           </div>
         </div>
 
-        <!-- 下一环节 -->
-        <div v-if="guidance.data.nextStep && guidance.data.currentStep" class="guidance-card next">
+        <!-- 下一环节 / 全部完成态 -->
+        <div v-if="guidance.data.nextStep" class="guidance-card next">
           <div class="card-title">下一步该写什么</div>
           <div class="card-sub next-step-sub">{{ guidance.data.nextStep.label }}</div>
           <div class="card-hint">{{ guidance.data.nextStep.desc }}</div>
+        </div>
+        <div v-else-if="guidance.data.completed" class="guidance-card done">
+          <div class="card-title">✅ 必填项已全部填完</div>
+          <div class="card-hint">可以点击「一键生成合同」生成初稿，生成后还可以做风险评估和 AI 修改。</div>
+        </div>
+
+        <!-- 指引加载失败提示（不再静默） -->
+        <div v-if="guidance.error" class="guidance-card error-card">
+          <div class="card-hint">⚠️ {{ guidance.error }}</div>
         </div>
 
         <!-- 法条依据 -->
@@ -261,10 +274,13 @@
               <div class="law-head">
                 <span class="law-name">《{{ law.law }}》</span>
                 <span v-if="law.article" class="law-article">{{ law.article }}</span>
+                <span v-if="law.topic" class="law-topic">{{ law.topic }}</span>
               </div>
               <div class="law-content" :title="law.content">{{ law.content }}</div>
             </div>
           </div>
+          <!-- 通俗摘要（后端已返回，展示给新手看） -->
+          <div v-if="guidance.data.basisSummary" class="law-summary">📖 通俗解读：{{ guidance.data.basisSummary }}</div>
         </div>
         <div v-else class="guidance-card law empty">
           <div class="card-title">📚 法条依据</div>
@@ -596,11 +612,14 @@ export default {
       guidance: {
         currentKey: '',
         loadingHint: false,
+        error: '',
         data: {
           currentStep: null,
           nextStep: null,
+          completed: false,
           hint: '',
           legalBasis: [],
+          basisSummary: '',
           formProgress: []
         }
       },
@@ -617,9 +636,23 @@ export default {
       return '#f56c6c';
     }
   },
+  watch: {
+    // 表单内容自动保存，刷新页面不丢（问题清单 #22）
+    contractForm: {
+      deep: true,
+      handler(v) {
+        try { sessionStorage.setItem('contract-draft-form', JSON.stringify(v)); } catch (e) { /* ignore */ }
+      }
+    }
+  },
   mounted() {
     this.loadTemplates();
     this.loadHistoryFromStorage();
+    // 恢复上次未完成的表单
+    try {
+      const saved = sessionStorage.getItem('contract-draft-form');
+      if (saved) Object.assign(this.contractForm, JSON.parse(saved));
+    } catch (e) { /* ignore */ }
     // 首次加载默认指引
     this.$nextTick(() => this.fetchGuidance('contractName'));
     // 初始化语音识别（Chrome/Edge 的 Web Speech API）
@@ -1138,26 +1171,57 @@ export default {
 
     async fetchGuidance(fieldKey, debounced = false) {
       clearTimeout(this._guidanceTimer);
-      const doFetch = () => {
+      const run = () => {
         this.guidance.currentKey = fieldKey;
+
+        // 缓存命中（同字段 + 填写进度未变）直接复用，不发请求（问题清单 #11）
+        const filledSig = Object.keys(this.contractForm).filter(k => String(this.contractForm[k] || '').trim()).join(',');
+        const cacheKey = `${fieldKey}|${this.contractForm.contractType || ''}|${filledSig}`;
+        this._guidanceCache = this._guidanceCache || {};
+        if (this._guidanceCache[cacheKey]) {
+          this.guidance.data = this._guidanceCache[cacheKey];
+          this.guidance.error = '';
+          this.guidance.loadingHint = false;
+          return;
+        }
+
+        // 取消未完成的旧请求 + 序号校验，杜绝竞态互相覆盖（问题清单 #13）
+        if (this._guidanceAbort) this._guidanceAbort.abort();
+        const ctrl = new AbortController();
+        this._guidanceAbort = ctrl;
+        const seq = ++this._guidanceSeq;
+
         this.guidance.loadingHint = true;
+        this.guidance.error = '';
         fetch('/api/contract_guidance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ currentField: fieldKey, contractForm: this.contractForm })
+          body: JSON.stringify({ currentField: fieldKey, contractForm: this.contractForm }),
+          signal: ctrl.signal
         }).then(r => r.json())
           .then(data => {
+            if (seq !== this._guidanceSeq) return; // 过期响应直接丢弃
             if (data.err_code === 0) {
               this.guidance.data = data.data;
+              this._guidanceCache[cacheKey] = data.data;
+            } else {
+              this.guidance.error = data.message || '指引加载失败';
             }
           })
-          .catch(err => console.warn('[guidance] fetch failed:', err.message))
-          .finally(() => { this.guidance.loadingHint = false; });
+          .catch(err => {
+            if (err.name === 'AbortError') return; // 被新请求取消，静默
+            if (seq === this._guidanceSeq) {
+              this.guidance.error = '指引加载失败，请重新点击输入框重试'; // 问题清单 #15：不再静默
+            }
+          })
+          .finally(() => {
+            if (seq === this._guidanceSeq) this.guidance.loadingHint = false; // 问题清单 #14
+          });
       };
       if (debounced) {
-        this._guidanceTimer = setTimeout(doFetch, 350);
+        this._guidanceTimer = setTimeout(run, 350);
       } else {
-        doFetch();
+        run();
       }
     },
 
@@ -1200,6 +1264,8 @@ export default {
       };
       this.errors = {};
       this.selectedTemplate = null;
+      this._guidanceCache = {};
+      sessionStorage.removeItem('contract-draft-form');
     },
 
     // 调整文本域高度
@@ -1310,14 +1376,14 @@ export default {
 
 .main-content {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   max-width: 1520px;
   margin: 0 auto;
 }
 
 /* 模板选择区域 */
 .template-section {
-  width: 220px;
+  width: 200px;
   flex-shrink: 0;
   background: white;
   border-radius: 8px;
@@ -1382,7 +1448,7 @@ export default {
 /* 表单区域 */
 .form-section {
   flex: 1 1 auto;
-  min-width: 460px;
+  min-width: 420px;
   background: white;
   border-radius: 8px;
   padding: 25px;
@@ -1491,7 +1557,7 @@ export default {
 
 /* 预览区域 */
 .preview-section {
-  width: 340px;
+  width: 320px;
   flex-shrink: 0;
   background: white;
   border-radius: 8px;
@@ -1785,18 +1851,58 @@ export default {
 .btn-expert-generate:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(64,158,255,0.3); }
 .btn-expert-generate:disabled { opacity: 0.65; cursor: not-allowed; }
 
-/* 响应式设计 */
-@media (max-width: 1200px) {
+/* 指引面板新增样式（问题清单修复） */
+.progress-node.clickable { cursor: pointer; }
+.progress-node.clickable:hover .progress-label { color: #409eff; }
+.req-mark { color: #f56c6c; margin-left: 2px; }
+.guidance-card.done {
+  border: 1px solid #b3e19d;
+  background: #f0f9eb;
+  border-radius: 8px;
+  padding: 12px;
+}
+.guidance-card.error-card {
+  border: 1px solid #fbc4c4;
+  background: #fef0f0;
+  border-radius: 8px;
+  padding: 12px;
+}
+.law-topic {
+  font-size: 11px;
+  color: #909399;
+  background: #f4f4f5;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+}
+.law-summary {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #fdf6ec;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #b88230;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+/* 响应式设计：1366 笔记本也走桌面布局，更窄才堆叠 */
+@media (max-width: 1400px) {
   .main-content {
     flex-direction: column;
   }
-  
+
+  /* 窄屏时把指引放在表单之前，填写时抬头就能看到（问题清单 #21） */
+  .guidance-section { order: 1; }
+  .form-section { order: 2; }
+  .preview-section { order: 3; }
+
   .template-section,
   .guidance-section,
   .preview-section {
     width: 100%;
   }
-  
+
   .form-row {
     flex-direction: column;
   }
