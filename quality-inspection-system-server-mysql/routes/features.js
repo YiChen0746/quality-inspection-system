@@ -144,11 +144,151 @@ ${chunk}
 1) score 越高风险越大：0-40 为低风险，41-70 为中风险，71-100 为高风险；
 2) risks 最多 5 条、suggestions 最多 4 条；每条必须指明本段中的具体表述或本段缺失的必备条款，不得编造本段未涉及的事实；若本段确无实质风险，risks 返回空数组，不要为凑数量编造问题；
 3) 每条 risks 末尾用（依据：Lx）标注引用的依据编号；无对应条文时写（依据：未检索到条文，建议人工核实）；
-4) 不得出现上面未列出的依据编号或法条名称。`;
+4) 不得出现上面未列出的依据编号或法条名称；
+5) 忠于原文：引用原文表述必须保留原措辞，不得改写、概括或补全原文没有写的内容；若原文已就某事项作出明确约定（例如已写明争议解决方式、付款时间、违约金比例），不得声称该事项「缺失」「未约定」「没有规定」，只能就其不足之处提出问题（如管辖法院的层级或地点不够明确、付款节点未与交付验收绑定、违约金比例明显过低）；
+6) 同一实质问题只保留一条风险点，不要为凑数量把同一问题拆成多条，也不要换措辞重复描述；
+7) suggestions 必须与 risks 逐条对应，尽量给出可直接替换或补充的条款文本，而不是泛泛提示「建议完善」；
+8) 不得给出与原文所选路径相冲突的建议：原文约定诉讼管辖的，不得建议改为仲裁或补充「仲裁机构」「仲裁条款」；原文约定仲裁的，不得建议改为诉讼；原文已确定金额、比例、期限的，只能就合理性提出意见，不得当作缺失项。
+9) 若原文已明确排除某种争议解决方式（例如写明「不选择仲裁」），这属于当事人意思自治，不得把它当作风险点，也不得建议引入该方式；只能针对所选方式的可执行性提意见（例如管辖法院的地点或层级未明确）。
+10) 输出必须是合法 JSON：字符串内不得出现未转义的英文双引号，需要强调时用中文书名号或「」。`;
+}
+
+// 归并近似重复项：多段评分时，同一问题在不同段落常以不同措辞出现
+// 归一化时去掉依据标注、标点、"明确/具体/相关"等填充词，并把常见同义词统一，
+// 避免同一问题因「条款/约定」「时间/期限」这类用词差异而漏判
+const FILLER_WORDS = /(具体的|具体|明确|相关|有关|相应|进行|存在|目前|当前)/g;
+const SYNONYM_GROUPS = [/约定|内容|条文/g, /挂钩|绑定|关联/g, /时间|期间|期限/g];
+function normalizeForCompare(text) {
+  let out = String(text || '')
+    .replace(/（依据：[^）]*）/g, '')
+    .replace(FILLER_WORDS, '');
+  SYNONYM_GROUPS.forEach((re) => { out = out.replace(re, '条款'); });
+  return out
+    .replace(/[\s，,。；;：:、"'“”‘’（）()【】\[\]《》!！?？\-—_/]/g, '')
+    .toLowerCase();
+}
+
+function bigramSet(str) {
+  const set = new Set();
+  for (let i = 0; i < str.length - 1; i += 1) set.add(str.slice(i, i + 2));
+  return set;
+}
+
+function isSimilarText(a, b) {
+  const na = normalizeForCompare(a);
+  const nb = normalizeForCompare(b);
+  if (na.length < 6 || nb.length < 6) return false;
+  if (na === nb) return true;
+  const shorter = na.length <= nb.length ? na : nb;
+  const longer = na.length <= nb.length ? nb : na;
+  if (shorter.length >= longer.length * 0.6 && longer.includes(shorter)) return true;
+  const sa = bigramSet(na);
+  const sb = bigramSet(nb);
+  if (!sa.size || !sb.size) return false;
+  let inter = 0;
+  sa.forEach((g) => { if (sb.has(g)) inter += 1; });
+  return inter / (sa.size + sb.size - inter) >= 0.55;
+}
+
+function mergeSimilarItems(items, limit) {
+  const kept = [];
+  (items || []).forEach((item) => {
+    const text = String(item || '').trim();
+    if (!text) return;
+    if (kept.some((k) => isSimilarText(k, text))) return;
+    kept.push(text);
+  });
+  const max = Number.isFinite(limit) ? Math.max(0, limit) : kept.length;
+  return kept.slice(0, max);
+}
+
+// 原文明确排除某争议解决方式时，把模型仍推荐该方式的条目滤掉（提示词之外的确定性兜底）
+function detectExcludedPath(content) {
+  const text = String(content || '');
+  const excluded = [];
+  if (/不(选择|采用|适用|提交|约定)?\s*仲裁|排除\s*仲裁|不通过\s*仲裁/.test(text)) excluded.push('仲裁');
+  if (/不(选择|采用|适用|提交)?\s*诉讼|排除\s*诉讼|不通过\s*诉讼/.test(text)) excluded.push('诉讼');
+  return excluded;
+}
+
+function dropPathConflictItems(items, excluded) {
+  if (!excluded.length) return { kept: items || [], removed: 0 };
+  // 出现"冲突/矛盾/并存/无效"等表述时，说明该条是在指出条款冲突，不应过滤
+  const conflictContext = /(冲突|矛盾|并存|重复|无效|相互抵触)/;
+  const kept = [];
+  let removed = 0;
+  (items || []).forEach((item) => {
+    const text = String(item || '');
+    const hitExcluded = excluded.some((path) => text.includes(path));
+    if (hitExcluded && !conflictContext.test(text)) { removed += 1; return; }
+    kept.push(item);
+  });
+  return { kept, removed };
+}
+
+// 从模型输出中提取 JSON：先按标准解析，再针对中文引号、尾随逗号等常见瑕疵修复
+function parseScoreJson(raw) {
+  const text = String(raw || '');
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  const body = text.substring(start, end + 1);
+  const candidates = [
+    body,
+    body.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'"),
+    body.replace(/,\s*([}\]])/g, '$1'),
+    body.replace(/[\u201c\u201d]/g, '"').replace(/,\s*([}\]])/g, '$1')
+  ];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch (e) { /* 继续尝试下一种修复 */ }
+  }
+  return null;
+}
+
+// 兜底：JSON 整体不可解析时，至少把 score 与两类文本数组捞出来，避免整段结论丢失
+function salvageScorePayload(raw) {
+  const text = String(raw || '');
+  const scoreMatch = text.match(/"score"\s*:\s*(-?\d+(?:\.\d+)?)/);
+  if (!scoreMatch) return null;
+  const grabList = (key) => {
+    const block = new RegExp(`"${key}"\\s*:\\s*\\[([\\s\\S]*?)\\]`).exec(text);
+    if (!block) return [];
+    const items = [];
+    const re = /"((?:[^"\\]|\\.)*)"/g;
+    let hit;
+    while ((hit = re.exec(block[1])) !== null) {
+      items.push(hit[1].replace(/\\"/g, '"').replace(/\\n/g, ' '));
+    }
+    return items;
+  };
+  return {
+    score: Number(scoreMatch[1]),
+    risks: grabList('risks'),
+    suggestions: grabList('suggestions')
+  };
+}
+
+// 模型偶尔把条目写成对象（如 {"risk":"…","依据":"L1"}），统一转成可读文本，避免出现 [object Object]
+function itemToText(item) {
+  if (typeof item === 'string') return item.trim();
+  if (!item || typeof item !== 'object') return '';
+  const primary = item.risk || item.desc || item.description || item.text || item.title || item.content || item.suggestion || '';
+  const basis = item.basis || item.evidence || item.reference || item['依据'] || item.law || '';
+  let text = typeof primary === 'string' ? primary.trim() : '';
+  if (!text) {
+    text = Object.values(item).filter((v) => typeof v === 'string').join('，').trim();
+  }
+  if (!text) return '';
+  if (basis && !/依据/.test(text)) text = `${text}（依据：${String(basis).trim()}）`;
+  return text.trim();
 }
 
 // 单段评分：返回 null 表示本次失败（由调用方决定是否中断）
-async function callScoreLLM(prompt) {
+// 解析失败时自动重试一次，并把「只要 JSON」的约束再强调一遍
+async function callScoreLLM(prompt, attempt = 1) {
   const response = await axios.post(`${LLM_BASE}/chat/completions`, {
     model: LLM_MODEL,
     messages: [{ role: 'user', content: prompt }],
@@ -164,22 +304,20 @@ async function callScoreLLM(prompt) {
   });
 
   const raw = response.data?.choices?.[0]?.message?.content || '';
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
+  const parsed = parseScoreJson(raw) || salvageScorePayload(raw);
 
-  let parsed = null;
-  try {
-    parsed = JSON.parse(raw.substring(start, end + 1));
-  } catch (e) {
+  if (!parsed || typeof parsed.score !== 'number' || Number.isNaN(parsed.score)) {
+    if (attempt < 2) {
+      const reinforced = `${prompt}\n\n上一次输出无法解析为 JSON。请严格只输出一个 JSON 对象，不要解释文字，字符串内不要出现英文双引号。`;
+      return callScoreLLM(reinforced, attempt + 1);
+    }
     return null;
   }
-  if (!parsed || typeof parsed.score !== 'number' || Number.isNaN(parsed.score)) return null;
 
   return {
     score: Math.max(0, Math.min(100, Math.round(parsed.score))),
-    risks: Array.isArray(parsed.risks) ? parsed.risks.map(String).filter(Boolean) : [],
-    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(String).filter(Boolean) : []
+    risks: Array.isArray(parsed.risks) ? parsed.risks.map(itemToText).filter(Boolean) : [],
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(itemToText).filter(Boolean) : []
   };
 }
 
@@ -248,11 +386,19 @@ const scoreContract = async (req, res) => {
       notices.push(`第 ${part} 段内容评估失败，本结论未覆盖该部分，请人工复核（依据：未检索到条文，建议人工核实）`);
     });
 
+    // 多段结果常出现同义重复的风险点，归并近似项后再按条数上限截断
+    const excludedPaths = detectExcludedPath(content);
+    const riskGuard = dropPathConflictItems(risks, excludedPaths);
+    const suggestionGuard = dropPathConflictItems(suggestions, excludedPaths);
+    const RISK_LIMIT = 8;
+    const mergedRisks = mergeSimilarItems(riskGuard.kept, Math.max(0, RISK_LIMIT - notices.length));
+    const mergedSuggestions = mergeSimilarItems(suggestionGuard.kept, 6);
+
     const scoreData = {
       score,
       level,
-      risks: [...notices, ...risks].slice(0, 8),
-      suggestions: suggestions.slice(0, 6),
+      risks: [...notices, ...mergedRisks].slice(0, RISK_LIMIT),
+      suggestions: mergedSuggestions,
       evidence,
       meta: {
         totalChars: content.length,
@@ -260,7 +406,11 @@ const scoreContract = async (req, res) => {
         chunks: chunks.length,
         evaluated: results.length,
         truncated,
-        failedParts
+        failedParts,
+        rawRiskCount: risks.length,
+        mergedRiskCount: mergedRisks.length,
+        excludedPaths,
+        filteredByPath: riskGuard.removed + suggestionGuard.removed
       }
     };
 
