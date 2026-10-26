@@ -161,11 +161,40 @@ async function callLLM(systemPrompt, userPrompt, options = {}) {
   return null;
 }
 
-// 调用某个元角色，统一记录调用统计
+// 过程事件推送：有 emit 时才推送，任何推送异常都不影响主流程
+function trace(ctx, type, data) {
+  if (!ctx || typeof ctx.emit !== 'function') return;
+  try {
+    ctx.emit(type, data);
+  } catch (e) {
+    // 推送失败只记录，不中断审查
+    console.warn('庭审事件推送失败:', e.message);
+  }
+}
+
+function roleMeta(roleKey, options) {
+  const role = META_ROLES[roleKey] || {};
+  return {
+    role: roleKey,
+    label: role.label || roleKey,
+    group: role.group || 'judge',
+    round: options.round || 0,
+    focus: options.focus || ''
+  };
+}
+
+// 调用某个元角色，统一记录调用统计；同时推送“开始发言/发言结束”事件供前端做实时庭审动画
 async function callRole(ctx, roleKey, userPrompt, options = {}) {
+  const meta = roleMeta(roleKey, options);
+  trace(ctx, 'agent:start', meta);
   const content = await callLLM(PROMPTS[roleKey], userPrompt, options);
   ctx.calls += 1;
   if (!content) ctx.failedCalls += 1;
+  trace(ctx, 'agent:speech', Object.assign({}, meta, {
+    text: content || '',
+    isLegal: /Legal|Refine/.test(roleKey),
+    isJudge: meta.group === 'judge'
+  }));
   return content;
 }
 
@@ -223,7 +252,7 @@ async function identifyFocuses(ctx, contractName, content) {
     `合同名称：${contractName || '未命名合同'}\n` +
     `请从以下合同文本中识别2-3个最关键的争议焦点：\n\n${clip(content)}`;
 
-  const raw = await callRole(ctx, 'judgeFocus', userPrompt, { maxTokens: 900 });
+  const raw = await callRole(ctx, 'judgeFocus', userPrompt, { maxTokens: 900, round: 0, focus: '争议焦点识别' });
   const parsed = parseJson(raw);
   let focuses = parsed && Array.isArray(parsed.focuses) ? parsed.focuses : [];
 
@@ -251,6 +280,7 @@ async function identifyFocuses(ctx, contractName, content) {
     ];
   }
 
+  trace(ctx, 'focuses', focuses);
   return focuses;
 }
 
@@ -261,19 +291,23 @@ async function runFirstRound(ctx, contractName, content, focus) {
     `合同全文：\n${clip(content, 6000)}\n\n` +
     `本轮争议焦点：${focus.title}\n焦点说明：${focus.reason || '无'}\n`;
 
+  const traceOpts = { round: 1, focus: focus.title };
   const [aLead, aEvidence, aLegalRaw, bLead, bEvidence, bLegalRaw] = await Promise.all([
-    callRole(ctx, 'partyALead', `${base}\n请从甲方（委托方）立场提出你的核心主张。`, { maxTokens: 400 }),
-    callRole(ctx, 'partyAEvidence', `${base}\n请从合同条款中构建对甲方有利/不利的证据链。`, { maxTokens: 400 }),
-    callRole(ctx, 'partyALegal', `${base}\n请生成甲方本轮的法律检索式。`, { maxTokens: 250 }),
-    callRole(ctx, 'partyBLead', `${base}\n请从乙方（相对方）立场提出你的核心抗辩。`, { maxTokens: 400 }),
-    callRole(ctx, 'partyBEvidence', `${base}\n请从合同条款中找出对乙方有利、或甲方主张缺乏支撑的地方。`, { maxTokens: 400 }),
-    callRole(ctx, 'partyBLegal', `${base}\n请生成乙方本轮的法律检索式。`, { maxTokens: 250 })
+    callRole(ctx, 'partyALead', `${base}\n请从甲方（委托方）立场提出你的核心主张。`, Object.assign({ maxTokens: 400 }, traceOpts)),
+    callRole(ctx, 'partyAEvidence', `${base}\n请从合同条款中构建对甲方有利/不利的证据链。`, Object.assign({ maxTokens: 400 }, traceOpts)),
+    callRole(ctx, 'partyALegal', `${base}\n请生成甲方本轮的法律检索式。`, Object.assign({ maxTokens: 250 }, traceOpts)),
+    callRole(ctx, 'partyBLead', `${base}\n请从乙方（相对方）立场提出你的核心抗辩。`, Object.assign({ maxTokens: 400 }, traceOpts)),
+    callRole(ctx, 'partyBEvidence', `${base}\n请从合同条款中找出对乙方有利、或甲方主张缺乏支撑的地方。`, Object.assign({ maxTokens: 400 }, traceOpts)),
+    callRole(ctx, 'partyBLegal', `${base}\n请生成乙方本轮的法律检索式。`, Object.assign({ maxTokens: 250 }, traceOpts))
   ]);
 
   const aLegal = parseJson(aLegalRaw) || {};
   const bLegal = parseJson(bLegalRaw) || {};
   const queryA = String(aLegal.query || `${focus.title} 合同 违约责任 法律依据`).slice(0, 200);
   const queryB = String(bLegal.query || `${focus.title} 合同 免责 抗辩 法律依据`).slice(0, 200);
+
+  trace(ctx, 'agent:query', { role: 'partyALegal', group: 'partyA', side: 'A', round: 1, focus: focus.title, query: queryA, intent: aLegal.intent || '' });
+  trace(ctx, 'agent:query', { role: 'partyBLegal', group: 'partyB', side: 'B', round: 1, focus: focus.title, query: queryB, intent: bLegal.intent || '' });
 
   return {
     entries: [
@@ -299,7 +333,7 @@ async function summarizeDebate(ctx, contractName, focus, entries) {
     `合同名称：${contractName || '未命名合同'}\n本轮焦点：${focus.title}\n\n` +
     `第一轮辩论记录：\n${clip(transcript, 5000)}\n\n请归纳本轮庭审结果。`;
 
-  const raw = await callRole(ctx, 'judgeDebate', userPrompt, { maxTokens: 900 });
+  const raw = await callRole(ctx, 'judgeDebate', userPrompt, { maxTokens: 900, round: 1, focus: focus.title });
   const parsed = parseJson(raw);
 
   const residual = parsed && Array.isArray(parsed.residual)
@@ -320,6 +354,7 @@ async function summarizeDebate(ctx, contractName, focus, entries) {
 
   const agreed = parsed && Array.isArray(parsed.agreed) ? parsed.agreed.slice(0, 5).map(String) : [];
 
+  trace(ctx, 'summary', { focus: focus.title, agreed, residual, nextQueries });
   return {
     agreed,
     residual: residual.length ? residual : [{ id: 'R1', title: focus.title, question: '该焦点是否已形成一致结论', reason: '模型未返回残余争议，按焦点本身复核' }],
@@ -336,20 +371,21 @@ async function runSecondRound(ctx, contractName, content, residual, knowledge, p
     `未决争议：${residual.title}\n待回答的问题：${residual.question || '无'}\n` +
     `已检索到的法律依据：\n${knowledgeText}\n`;
 
+  const traceOpts = { round: 2, focus: residual.title };
   const [aRebuttal, aLegalRaw, bRebuttal, bLegalRaw] = await Promise.all([
-    callRole(ctx, 'partyARebuttal', `${base}\n请从甲方立场作第二轮回应。`, { maxTokens: 450 }),
+    callRole(ctx, 'partyARebuttal', `${base}\n请从甲方立场作第二轮回应。`, Object.assign({ maxTokens: 450 }, traceOpts)),
     callRole(
       ctx,
       'partyALegalRefine',
       `${base}\n上一轮检索式：${previousQueries.queryA || '无'}\n请重写甲方的检索式。`,
-      { maxTokens: 300 }
+      Object.assign({ maxTokens: 300 }, traceOpts)
     ),
-    callRole(ctx, 'partyBRebuttal', `${base}\n请从乙方立场作第二轮抗辩。`, { maxTokens: 450 }),
+    callRole(ctx, 'partyBRebuttal', `${base}\n请从乙方立场作第二轮抗辩。`, Object.assign({ maxTokens: 450 }, traceOpts)),
     callRole(
       ctx,
       'partyBLegalRefine',
       `${base}\n上一轮检索式：${previousQueries.queryB || '无'}\n请重写乙方的检索式。`,
-      { maxTokens: 300 }
+      Object.assign({ maxTokens: 300 }, traceOpts)
     )
   ]);
 
@@ -357,6 +393,9 @@ async function runSecondRound(ctx, contractName, content, residual, knowledge, p
   const bLegal = parseJson(bLegalRaw) || {};
   const queryA = String(aLegal.query || previousQueries.queryA || residual.title).slice(0, 200);
   const queryB = String(bLegal.query || previousQueries.queryB || residual.title).slice(0, 200);
+
+  trace(ctx, 'agent:query', { role: 'partyALegalRefine', group: 'partyA', side: 'A', round: 2, focus: residual.title, query: queryA, intent: aLegal.intent || '' });
+  trace(ctx, 'agent:query', { role: 'partyBLegalRefine', group: 'partyB', side: 'B', round: 2, focus: residual.title, query: queryB, intent: bLegal.intent || '' });
 
   return {
     entries: [
@@ -385,7 +424,7 @@ async function finalVerdict(ctx, contractName, content, focuses, allEntries, res
     `动态检索到的法律依据：\n${formatKnowledge(knowledge)}\n\n` +
     '请完成全链条复核，输出最终审查结论。';
 
-  const raw = await callRole(ctx, 'judgeVerdict', userPrompt, { maxTokens: 2400, temperature: 0.2 });
+  const raw = await callRole(ctx, 'judgeVerdict', userPrompt, { maxTokens: 2400, temperature: 0.2, round: 3, focus: '终审裁决' });
   const parsed = parseJson(raw);
 
   if (parsed && typeof parsed.score !== 'undefined') {
@@ -450,13 +489,20 @@ router.get('/contract_content/:id', async (req, res) => {
   }
 });
 
-// 多智能体审查主接口
-router.post('/review', async (req, res) => {
+// 多智能体审查主流程
+// emit 为空时按普通 JSON 返回；传入 emit 时（流式接口）改为逐事件推送，供前端做实时庭审动画
+async function handleReview(req, res, emit) {
+  const fail = (status, message) => {
+    if (emit) {
+      emit('error', { status, message });
+      return null;
+    }
+    res.status(status).json({ err_code: status, message });
+    return null;
+  };
+
   if (!LLM_KEY) {
-    return res.status(500).json({
-      err_code: 500,
-      message: '服务端未配置 LLM_API_KEY（大模型密钥），请在 .env 中配置后重启后端'
-    });
+    return fail(500, '服务端未配置 LLM_API_KEY（大模型密钥），请在 .env 中配置后重启后端');
   }
 
   const startedAt = Date.now();
@@ -482,13 +528,11 @@ router.post('/review', async (req, res) => {
   }
 
   if (!content || content.trim().length < 50) {
-    return res.status(400).json({
-      err_code: 400,
-      message: '合同正文过短（至少50字），请粘贴完整合同内容或选择已上传的合同'
-    });
+    return fail(400, '合同正文过短（至少50字），请粘贴完整合同内容或选择已上传的合同');
   }
 
-  const ctx = { calls: 0, failedCalls: 0 };
+  if (emit) emit('start', { contractName: name || '未命名合同', model: LLM_MODEL, totalChars: content.length });
+  const ctx = { calls: 0, failedCalls: 0, emit };
 
   try {
     // 加载内部知识源（历史审查案例 + 合同模板），供所有检索式复用
@@ -513,6 +557,7 @@ router.post('/review', async (req, res) => {
 
       allEntries.push(...first.entries);
       stageFocuses.push({ focus, entries: first.entries.length, queries: [first.queryA, first.queryB], knowledgeCount: knowledge1.length });
+      if (emit) emit('knowledge', { round: 1, items: knowledge1 });
 
       // 阶段三：庭审主持归纳未决争议（把检索到的法条一并交给主持法官）
       const summary = await summarizeDebate(ctx, name, focus, first.entries);
@@ -538,6 +583,7 @@ router.post('/review', async (req, res) => {
 
       // 保存每个焦点的检索知识，最后统一去重
       focus.__knowledge = knowledge2;
+      if (emit) emit('knowledge', { round: 2, items: knowledge2 });
     }
 
     const knowledge = pruneKnowledge(mergeKnowledge(...focuses.map((f) => f.__knowledge || [])));
@@ -576,38 +622,94 @@ router.post('/review', async (req, res) => {
     // 清理内部字段
     const cleanFocuses = focuses.map(({ __knowledge, ...rest }) => rest);
 
-    return res.json({
-      err_code: 0,
-      message: '多智能体审查完成',
-      data: {
-        contractName: name || '未命名合同',
-        model: LLM_MODEL,
-        metaRoles: Object.values(META_ROLES),
-        focuses: cleanFocuses,
-        stages: stageFocuses.map((sf) => ({
-          focus: sf.focus,
-          agreed: sf.agreed || [],
-          residual: sf.residual || [],
-          nextQueries: sf.nextQueries || [],
-          queries: sf.queries,
-          knowledgeCount: sf.knowledgeCount
-        })),
-        debate: allEntries,
-        knowledge,
-        verdict,
-        stats: {
-          llmCalls: ctx.calls,
-          failedCalls: ctx.failedCalls,
-          elapsedMs: Date.now() - startedAt
-        }
+    const payload = {
+      contractName: name || '未命名合同',
+      model: LLM_MODEL,
+      metaRoles: Object.values(META_ROLES),
+      focuses: cleanFocuses,
+      stages: stageFocuses.map((sf) => ({
+        focus: sf.focus,
+        agreed: sf.agreed || [],
+        residual: sf.residual || [],
+        nextQueries: sf.nextQueries || [],
+        queries: sf.queries,
+        knowledgeCount: sf.knowledgeCount
+      })),
+      debate: allEntries,
+      knowledge,
+      verdict,
+      stats: {
+        llmCalls: ctx.calls,
+        failedCalls: ctx.failedCalls,
+        elapsedMs: Date.now() - startedAt
       }
-    });
+    };
+
+    // 流式接口：推送终审结论与完成事件；普通接口：一次性返回完整数据
+    if (emit) {
+      emit('verdict', verdict);
+      emit('done', payload);
+      return payload;
+    }
+
+    return res.json({ err_code: 0, message: '多智能体审查完成', data: payload });
   } catch (error) {
     console.error('多智能体审查失败:', error);
+    if (emit) {
+      emit('error', { status: 500, message: `多智能体审查失败：${error.message}` });
+      return null;
+    }
     return res.status(500).json({
       err_code: 500,
       message: `多智能体审查失败：${error.message}`
     });
+  }
+}
+
+// 普通请求-响应接口：前端等待完整结果后一次性渲染
+router.post('/review', async (req, res) => {
+  await handleReview(req, res, null);
+});
+
+// 流式接口：逐事件以 NDJSON 推送，前端据此播放实时庭审过程
+router.post('/review-stream', async (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  let closed = false;
+  res.on('close', () => { closed = true; });
+
+  const emit = (type, data) => {
+    if (closed) return;
+    try {
+      res.write(JSON.stringify({ type, data }) + '\n');
+    } catch (e) {
+      closed = true;
+    }
+  };
+
+  // 大模型单次调用可能较久，定期发心跳避免中间代理断开连接
+  const heartbeat = setInterval(() => {
+    if (closed) return;
+    try {
+      res.write(JSON.stringify({ type: 'ping', ts: Date.now() }) + '\n');
+    } catch (e) {
+      closed = true;
+    }
+  }, 15000);
+
+  try {
+    await handleReview(req, res, emit);
+  } catch (error) {
+    console.error('多智能体流式审查异常:', error);
+    emit('error', { status: 500, message: error.message });
+  } finally {
+    clearInterval(heartbeat);
+    if (!closed) res.end();
   }
 });
 

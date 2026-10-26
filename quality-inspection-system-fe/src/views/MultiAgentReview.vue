@@ -78,26 +78,35 @@
 
       <!-- 右侧：过程与结果 -->
       <div class="result-column">
-        <el-card shadow="never" class="panel" v-if="loading">
-          <div class="running-box">
-            <el-steps :active="activeStep" finish-status="success" align-center>
-              <el-step title="焦点识别" description="JudgeFocus" />
-              <el-step title="第一轮辩论" description="6 个元角色" />
-              <el-step title="动态检索" description="查询式演化" />
-              <el-step title="第二轮攻坚" description="残余争议" />
-              <el-step title="终审裁决" description="JudgeVerdict" />
-            </el-steps>
-            <div class="running-tip">
-              庭审模拟进行中，已用时 {{ elapsed }} 秒。多智能体需要多轮调用大模型，请耐心等待。
+        <!-- 虚拟法庭：实时播放后端推送的庭审过程（结束后保留，可当回放看） -->
+        <el-card
+          shadow="never"
+          class="panel court-panel"
+          v-if="loading || courtEvents.length"
+          v-show="!courtCollapsed"
+        >
+          <template #header>
+            <div class="panel-title court-panel-title">
+              <span>虚拟法庭 · 庭审实况</span>
+              <el-button size="small" text @click="courtCollapsed = true">收起画面</el-button>
             </div>
-          </div>
+          </template>
+          <VirtualCourt
+            :contract-name="form.contractName || (result && result.contractName)"
+            :events="courtEvents"
+            :stream-done="!loading"
+          />
         </el-card>
+        <div class="court-collapsed-bar" v-if="courtEvents.length && courtCollapsed">
+          <span>庭审画面已收起</span>
+          <el-button size="small" text type="primary" @click="courtCollapsed = false">展开庭审画面</el-button>
+        </div>
 
-        <el-card shadow="never" class="panel empty-panel" v-else-if="!result">
+        <el-card shadow="never" class="panel empty-panel" v-if="!loading && !result">
           <el-empty description="输入合同后启动审查，这里会展示庭审全过程和终审结论" />
         </el-card>
 
-        <template v-else>
+        <template v-if="result">
           <!-- 结论总览 -->
           <el-card shadow="never" class="panel verdict-overview">
             <div class="verdict-left">
@@ -282,9 +291,11 @@
 <script>
 import { ElMessage } from 'element-plus';
 import { getAuthHeaders } from '@Setup/storage/user.js';
+import VirtualCourt from '@/components/VirtualCourt.vue';
 
 export default {
   name: 'MultiAgentReview',
+  components: { VirtualCourt },
   data() {
     return {
       contracts: [],
@@ -300,6 +311,10 @@ export default {
       stepTimer: null,
       result: null,
       activeTab: 'verdict',
+      // 虚拟法庭：后端推送的庭审事件按到达顺序累积
+      courtEvents: [],
+      courtCollapsed: false,
+      streamAbort: null,
       roleGroups: [
         {
           title: '审判组 JudgeTeam',
@@ -365,6 +380,15 @@ export default {
   },
   beforeUnmount() {
     this.clearTimers();
+    // 离开页面时中断未完成的流式庭审，避免连接悬挂
+    if (this.streamAbort) {
+      try {
+        this.streamAbort.abort();
+      } catch (error) {
+        console.warn('中断庭审流失败:', error);
+      }
+      this.streamAbort = null;
+    }
   },
   methods: {
     // 接收快速初筛页面“转深度审查”带过来的正文
@@ -451,37 +475,131 @@ export default {
       this.loading = true;
       this.result = null;
       this.activeTab = 'verdict';
+      this.courtEvents = [];
+      this.courtCollapsed = false;
       this.startTimer();
 
       try {
-        const resp = await fetch('/api/multi-agent/review', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders()
-          },
-          body: JSON.stringify({
-            contractContent: content,
-            contractName: this.form.contractName,
-            contractId: this.selectedContractId || undefined
-          })
-        });
-
-        const data = await resp.json();
-        if (data.err_code === 0) {
-          this.result = data.data;
-          this.activeStep = 5;
-          ElMessage.success('多智能体审查完成');
-        } else {
-          ElMessage.error(data.message || '审查失败');
+        const payload = {
+          contractContent: content,
+          contractName: this.form.contractName,
+          contractId: this.selectedContractId || undefined
+        };
+        // 优先走流式接口：庭审过程按真实顺序推送到虚拟法庭
+        const streamed = await this.runStreamReview(payload);
+        if (!streamed) {
+          // 浏览器不支持流式读取或流式接口不可用时，退回一次性接口
+          await this.runPlainReview(payload);
         }
       } catch (error) {
         console.error('多智能体审查失败:', error);
-        ElMessage.error('网络错误或审查超时，请稍后重试');
+        ElMessage.error(error.message || '网络错误或审查超时，请稍后重试');
       } finally {
         this.loading = false;
         this.clearTimers();
       }
+    },
+
+    // 流式审查：逐行读取 NDJSON，边到边推进虚拟法庭
+    async runStreamReview(payload) {
+      if (typeof window === 'undefined' || !window.ReadableStream || !window.TextDecoder) return false;
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      this.streamAbort = controller;
+
+      let resp;
+      try {
+        resp = await fetch('/api/multi-agent/review-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify(payload),
+          signal: controller ? controller.signal : undefined
+        });
+      } catch (error) {
+        console.warn('流式接口不可用，改用普通接口:', error.message);
+        return false;
+      }
+
+      if (!resp.ok || !resp.body || !resp.body.getReader) {
+        console.warn('流式接口不可用（状态码 ' + resp.status + '），改用普通接口');
+        return false;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let finished = false;
+
+      while (!finished) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          let evt;
+          try {
+            evt = JSON.parse(line);
+          } catch (e) {
+            continue;
+          }
+          if (evt.type === 'ping') continue;
+          this.courtEvents.push(evt);
+          if (evt.type === 'done') {
+            this.result = evt.data;
+            this.activeStep = 5;
+            finished = true;
+            ElMessage.success('多智能体审查完成');
+          } else if (evt.type === 'error') {
+            throw new Error((evt.data && evt.data.message) || '庭审中断');
+          }
+        }
+      }
+      return true;
+    },
+
+    // 兼容路径：不支持流式时仍可完成审查（虚拟法庭会一次性补齐所有事件）
+    async runPlainReview(payload) {
+      const resp = await fetch('/api/multi-agent/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (data.err_code === 0) {
+        this.result = data.data;
+        this.activeStep = 5;
+        this.replayFromResult(data.data);
+        ElMessage.success('多智能体审查完成');
+      } else {
+        throw new Error(data.message || '审查失败');
+      }
+    },
+
+    // 用完整结果补出一套事件，让虚拟法庭仍能按顺序回放
+    replayFromResult(data) {
+      const events = [{ type: 'start', data: { contractName: data.contractName } }];
+      if (data.focuses && data.focuses.length) {
+        events.push({ type: 'focuses', data: data.focuses });
+      }
+      (data.debate || []).forEach((msg) => {
+        const role = msg.role;
+        const group = msg.side === 'A' ? 'partyA' : msg.side === 'B' ? 'partyB' : 'judge';
+        events.push({ type: 'agent:speech', data: { role, label: msg.roleLabel, group, round: msg.round, text: msg.content } });
+        if (msg.query) {
+          events.push({ type: 'agent:query', data: { role, side: msg.side, query: msg.query } });
+        }
+      });
+      if (data.knowledge && data.knowledge.length) {
+        events.push({ type: 'knowledge', data: { round: 2, items: data.knowledge } });
+      }
+      (data.stages || []).forEach((st) => {
+        events.push({ type: 'summary', data: { agreed: st.agreed || [], residual: st.residual || [] } });
+      });
+      events.push({ type: 'verdict', data: data.verdict });
+      events.push({ type: 'done', data });
+      this.courtEvents = events;
     },
 
     exportReport() {
@@ -538,6 +656,33 @@ export default {
 .panel-title {
   font-weight: 600;
   color: #1f2d3d;
+}
+/* 虚拟法庭：卡片内边距去掉，让暗色舞台铺满 */
+.court-panel :deep(.el-card__header) {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e8edf5;
+}
+.court-panel :deep(.el-card__body) {
+  padding: 0;
+}
+.court-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.court-collapsed-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f2f5fb;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #475467;
 }
 .input-footer {
   display: flex;
