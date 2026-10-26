@@ -223,6 +223,40 @@
           <h3>起草指引</h3>
         </div>
 
+        <!-- ============ 起草后阶段向导（问题清单 #19）：初稿生成后接管面板 ============ -->
+        <div v-if="draftStage !== 'filling' && stageInfo" class="stage-flow">
+          <div class="stage-steps">
+            <div
+              v-for="s in stageSteps"
+              :key="s.key"
+              class="stage-step"
+              :class="{ done: s.done, current: s.current }"
+            >
+              <span class="stage-dot">{{ s.done ? '✓' : (s.current ? '●' : '○') }}</span>
+              <span class="stage-label">{{ s.label }}</span>
+              <span v-if="!s.done" class="stage-line"></span>
+            </div>
+          </div>
+
+          <div class="stage-card" :class="draftStage">
+            <div class="stage-msg">{{ stageInfo.title }}</div>
+            <div class="stage-hint">{{ stageInfo.hint }}</div>
+            <button
+              v-if="stageInfo.action"
+              type="button"
+              class="stage-btn"
+              :disabled="isScoring || isRevising"
+              @click="stageInfo.action.fn"
+            >{{ stageInfo.action.text }}</button>
+          </div>
+
+          <div class="guidance-tip">
+            💡 修改左侧或表单内容后，重新生成/评分即可刷新阶段状态
+          </div>
+        </div>
+
+        <!-- ============ 填表中的字段指引（阶段向导接管后隐藏） ============ -->
+        <template v-else>
         <!-- 环节进度条（可点击跳转，必填项带 * 标记） -->
         <div class="guidance-progress">
           <div
@@ -291,6 +325,7 @@
         <div class="guidance-tip">
           💡 点击任一输入框可查看针对该字段的专属指引
         </div>
+        </template>
       </div>
 
       <!-- 右侧：合同预览和历史记录 -->
@@ -634,6 +669,57 @@ export default {
       if (s <= 40) return '#67c23a';
       if (s <= 70) return '#e6a23c';
       return '#f56c6c';
+    },
+
+    // ============ 起草后阶段感知（问题清单 #19） ============
+    // filling: 填表中 | score: 初稿已生成待评分 | revise: 有风险待修改 | export: 低风险可定稿
+    draftStage() {
+      if (!this.currentContract || !String(this.currentContract.contractContent || '').trim()) return 'filling';
+      if (!this.riskScore) return 'score';
+      return this.riskScore.level === '低' ? 'export' : 'revise';
+    },
+
+    // 四阶段流程条（填表 → 评分 → 修改 → 导出）
+    stageSteps() {
+      const order = ['filling', 'score', 'revise', 'export'];
+      const labels = { filling: '填写', score: '风险评估', revise: 'AI 修改', export: '导出定稿' };
+      const curIdx = order.indexOf(this.draftStage);
+      return order.map((key, i) => ({
+        key,
+        label: labels[key],
+        done: i < curIdx || (this.draftStage === 'export' && key === 'revise' && this.reviseRound > 0),
+        current: i === curIdx
+      }));
+    },
+
+    // 当前阶段的引导文案与直达动作
+    stageInfo() {
+      if (this.draftStage === 'score') {
+        return {
+          title: '📝 初稿已生成',
+          hint: '点击右侧【开始风险评估】，让 AI 检查这份合同有没有坑、条款是否公平。',
+          action: { text: '立即风险评估', fn: this.scoreCurrentContract }
+        };
+      }
+      if (this.draftStage === 'revise') {
+        const cnt = (this.riskScore?.risks?.length || 0);
+        const roundTip = this.reviseRound > 0 ? `你已完成 ${this.reviseRound} 轮 AI 修改，` : '';
+        return {
+          title: `⚠️ 当前${this.riskScore.level}风险（${this.riskScore.score} 分），发现 ${cnt} 条风险点`,
+          hint: `${roundTip}建议点击风险等级旁的【AI 补充修改】让智能体修订，改完记得重新评分。修改没有次数限制，直到满意为止。`,
+          action: { text: 'AI 补充修改', fn: () => { this.reviseDialogVisible = true; } }
+        };
+      }
+      if (this.draftStage === 'export') {
+        return {
+          title: `✅ 合同已达低风险（${this.riskScore.score} 分）`,
+          hint: this.reviseRound > 0
+            ? `经过 ${this.reviseRound} 轮 AI 修改，合同已比较完善。可以导出 Word/PDF 定稿了。`
+            : '合同风险较低，可以导出 Word/PDF 定稿了。如仍想完善，可继续 AI 补充修改。',
+          action: { text: '导出定稿', fn: this.showExportDialog }
+        };
+      }
+      return null;
     }
   },
   watch: {
@@ -1850,6 +1936,69 @@ export default {
 }
 .btn-expert-generate:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(64,158,255,0.3); }
 .btn-expert-generate:disabled { opacity: 0.65; cursor: not-allowed; }
+
+/* ============ 起草后阶段向导（#19） ============ */
+.stage-flow { display: flex; flex-direction: column; gap: 12px; }
+.stage-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.stage-step { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.stage-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  background: #e5e7eb;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+.stage-step.done .stage-dot { background: #67c23a; color: white; }
+.stage-step.current .stage-dot { background: #409eff; color: white; animation: stage-pulse 1.6s infinite; }
+@keyframes stage-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(64,158,255,0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(64,158,255,0); }
+}
+.stage-label { font-size: 11px; color: #606266; white-space: nowrap; }
+.stage-step.current .stage-label { color: #409eff; font-weight: 700; }
+.stage-line { width: 10px; height: 1px; background: #d4d7de; display: inline-block; margin: 0 2px; }
+.stage-card {
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stage-card.score { background: #ecf5ff; border: 1px solid #b3d8ff; }
+.stage-card.revise { background: #fdf6ec; border: 1px solid #f5dab1; }
+.stage-card.export { background: #f0f9eb; border: 1px solid #b3e19d; }
+.stage-msg { font-size: 14px; font-weight: 700; color: #303133; }
+.stage-hint { font-size: 12px; color: #606266; line-height: 1.7; }
+.stage-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.stage-card.score .stage-btn { background: linear-gradient(135deg, #409eff, #3a8ee6); }
+.stage-card.revise .stage-btn { background: linear-gradient(135deg, #e6a23c, #cf8a1f); }
+.stage-card.export .stage-btn { background: linear-gradient(135deg, #67c23a, #4fa31b); }
+.stage-btn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,0.15); }
+.stage-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* 指引面板新增样式（问题清单修复） */
 .progress-node.clickable { cursor: pointer; }
