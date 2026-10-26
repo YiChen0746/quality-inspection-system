@@ -41,23 +41,111 @@
         </div>
       </div>
 
-      <!-- 技能中心：可互动按钮，点击即用 -->
+      <!-- 技能中心：可互动按钮，点击即用（开源化：支持自建/导入/分享技能包） -->
       <div class="skill-section">
-        <div class="session-title">🛠 技能中心</div>
-        <div class="skill-grid">
-          <button
-            v-for="skill in skills"
-            :key="skill.name"
-            class="skill-btn"
-            :disabled="data.isLoading"
-            @click="useSkill(skill)"
-          >
-            <span class="skill-icon">{{ skill.icon }}</span>
-            <span class="skill-name">{{ skill.name }}</span>
-            <span class="skill-desc">{{ skill.desc }}</span>
-          </button>
+        <div class="skill-header">
+          <span class="session-title">🛠 技能中心</span>
+          <div class="skill-header-actions">
+            <button type="button" class="skill-mini-btn" title="创建自己的技能" @click="openSkillForm()">＋ 添加</button>
+            <button type="button" class="skill-mini-btn" title="导入他人分享的 .json 技能包" @click="triggerImportPack()">📥 导入</button>
+          </div>
         </div>
+        <input ref="importPackInput" type="file" accept=".json,application/json" style="display: none" @change="handleImportPack" />
+        <div class="skill-grid">
+          <div
+            v-for="(skill, idx) in allSkills"
+            :key="skill.name"
+            class="skill-btn-wrap"
+          >
+            <button
+              class="skill-btn"
+              :disabled="data.isLoading"
+              @click="useSkill(skill)"
+            >
+              <span class="skill-icon">{{ skill.icon }}</span>
+              <span class="skill-name">{{ skill.name }}</span>
+              <span class="skill-desc">{{ skill.desc }}</span>
+            </button>
+            <!-- 卡片操作：分享 / 编辑(fork) / 删除 -->
+            <div class="skill-actions">
+              <span class="skill-tag" title="内置技能" v-if="idx < builtinSkills.length">内置</span>
+              <span class="skill-tag mine" title="你创建的技能" v-else>自建</span>
+              <button type="button" class="skill-op" title="分享为 .json 技能包" @click.stop="exportSkill(skill)">📤</button>
+              <button
+                type="button"
+                class="skill-op"
+                :title="idx < builtinSkills.length ? '复制一份来修改（Fork）' : '编辑此技能'"
+                @click.stop="idx < builtinSkills.length ? openSkillForm(skill) : openSkillForm(skill, idx - builtinSkills.length)"
+              >✎</button>
+              <button
+                v-if="idx >= builtinSkills.length"
+                type="button"
+                class="skill-op danger"
+                title="删除此技能"
+                @click.stop="removeUserSkill(idx - builtinSkills.length)"
+              >✕</button>
+            </div>
+          </div>
+        </div>
+        <div class="skill-tip">💡 每个技能都能 ✎ Fork 修改、📤 导出分享；收到别人的 .json 技能包点「导入」即可使用</div>
       </div>
+
+      <!-- 添加/编辑技能弹窗 -->
+      <el-dialog v-model="skillFormVisible" :title="skillEditIndex >= 0 ? '编辑技能' : '创建新技能'" width="480px" append-to-body>
+        <div class="skill-form">
+          <div class="skill-form-row">
+            <div class="skill-form-field icon-field">
+              <label>图标</label>
+              <div class="icon-presets">
+                <span
+                  v-for="ic in SKILL_ICON_PRESETS"
+                  :key="ic"
+                  class="icon-preset"
+                  :class="{ active: skillForm.icon === ic }"
+                  @click="skillForm.icon = ic"
+                >{{ ic }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="skill-form-row">
+            <div class="skill-form-field">
+              <label>技能名称 *</label>
+              <input v-model="skillForm.name" maxlength="12" placeholder="如：押金纠纷分析" />
+            </div>
+            <div class="skill-form-field">
+              <label>一句话描述</label>
+              <input v-model="skillForm.desc" maxlength="14" placeholder="如：押金退还问题逐条分析" />
+            </div>
+          </div>
+          <div class="skill-form-row">
+            <div class="skill-form-field">
+              <label>触发方式</label>
+              <div class="radio-line">
+                <label class="radio-item"><input v-model="skillForm.action" type="radio" value="prompt" /> 填入模板（我补充内容后发送）</label>
+                <label class="radio-item"><input v-model="skillForm.action" type="radio" value="send" /> 直接发送（一点就问）</label>
+              </div>
+            </div>
+          </div>
+          <div class="skill-form-row">
+            <div class="skill-form-field">
+              <label>提示词 / 问题内容 *</label>
+              <textarea v-model="skillForm.text" rows="5" placeholder="写清楚让 AI 做什么。提示：想留填写位置，可以用「」或引号包住"></textarea>
+            </div>
+          </div>
+          <div v-if="skillForm.action === 'prompt'" class="skill-form-row">
+            <div class="skill-form-field">
+              <label>光标停在距末尾 {{ skillForm.cursorBefore }} 个字符处</label>
+              <input v-model.number="skillForm.cursorBefore" type="range" min="0" :max="skillForm.text.length" />
+              <div class="cursor-preview">预览：{{ skillForm.text.slice(0, skillForm.text.length - skillForm.cursorBefore) }}<span class="cursor-mark">|</span>{{ skillForm.text.slice(skillForm.text.length - skillForm.cursorBefore) }}</div>
+            </div>
+          </div>
+        </div>
+        <template #footer>
+          <el-button @click="triggerImportPack">📥 从 JSON 导入</el-button>
+          <el-button @click="skillFormVisible = false">取消</el-button>
+          <el-button type="primary" @click="saveUserSkill">保存技能</el-button>
+        </template>
+      </el-dialog>
     </div>
 
     <!-- 右侧聊天区 -->
@@ -115,7 +203,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, nextTick, onMounted } from 'vue'
+import { reactive, ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus';
 import Message from '@/components/Message/index.vue';
@@ -152,7 +240,7 @@ const currentSessionId = ref<number | null>(null);
 const currentSessionTitle = ref('');
 const router = useRouter();
 
-// ==================== 技能中心 ====================
+// ==================== 技能中心（开源化：内置技能 + 社区自建技能包） ====================
 // action 类型：prompt=填入模板并定位光标待用户补充 | send=直接发送 | api=调接口取真实数据 | nav=跳转页面
 interface Skill {
   icon: string;
@@ -165,7 +253,11 @@ interface Skill {
   path?: string;          // nav 模式的路由
 }
 
-const skills: Skill[] = [
+// 技能包文件格式（可分享给他人导入，类似 GitHub 分享 gist）
+// { skillpack: "legal-qa-skill", version: 1, icon, name, desc, action, text, cursorBefore }
+const SKILLPACK_KEY = 'legal-qa-user-skills';
+
+const builtinSkills: Skill[] = [
   {
     icon: '⚠️', name: '条款风险速查', desc: '粘贴条款秒评风险', action: 'prompt',
     text: '【条款风险速查】请评估以下合同条款的法律风险，指出问题所在并给出具体修改建议：\n「」',
@@ -193,6 +285,143 @@ const skills: Skill[] = [
     path: '/contract-draft'
   }
 ];
+
+// ============ 开源化：用户自建技能（localStorage 持久化，可导入导出分享） ============
+const userSkills = ref<Skill[]>([]);
+
+try {
+  const saved = localStorage.getItem(SKILLPACK_KEY);
+  if (saved) userSkills.value = JSON.parse(saved);
+} catch (e) { /* 忽略损坏数据 */ }
+
+const saveUserSkills = () => {
+  try { localStorage.setItem(SKILLPACK_KEY, JSON.stringify(userSkills.value)); } catch (e) { /* ignore */ }
+};
+
+// 展示列表 = 内置 + 自建
+const allSkills = computed<Skill[]>(() => [...builtinSkills, ...userSkills.value]);
+
+// 添加/编辑技能弹窗
+const skillFormVisible = ref(false);
+const skillEditIndex = ref(-1); // -1=新建，>=0=编辑对应自建技能
+const skillForm = reactive<Skill>({
+  icon: '✨',
+  name: '',
+  desc: '',
+  action: 'prompt',
+  text: '',
+  cursorBefore: 0
+});
+
+const SKILL_ICON_PRESETS = ['✨', '⚠️', '⚖️', '🎓', '📊', '⏰', '📄', '🧾', '🔍', '💡', '🛡️', '📝'];
+
+const openSkillForm = (skill?: Skill, index = -1) => {
+  if (skill) {
+    // 编辑自建技能，或从内置技能“Fork”一份来改
+    Object.assign(skillForm, {
+      icon: skill.icon, name: skill.name, desc: skill.desc,
+      action: skill.action, text: skill.text || '', cursorBefore: skill.cursorBefore ?? 0
+    });
+    skillEditIndex.value = index;
+  } else {
+    Object.assign(skillForm, { icon: '✨', name: '', desc: '', action: 'prompt', text: '', cursorBefore: 0 });
+    skillEditIndex.value = -1;
+  }
+  skillFormVisible.value = true;
+};
+
+const saveUserSkill = () => {
+  if (!skillForm.name.trim()) { ElMessage.warning('请填写技能名称'); return; }
+  if (!skillForm.text.trim()) { ElMessage.warning('请填写提示词/问题内容'); return; }
+  const item: Skill = {
+    icon: skillForm.icon || '✨',
+    name: skillForm.name.trim(),
+    desc: skillForm.desc.trim() || '自定义技能',
+    action: skillForm.action === 'send' ? 'send' : 'prompt',
+    text: skillForm.text,
+    cursorBefore: skillForm.action === 'prompt' ? Math.max(0, Math.min(skillForm.cursorBefore ?? 0, skillForm.text.length)) : 0
+  };
+  if (skillEditIndex.value >= 0) {
+    userSkills.value[skillEditIndex.value] = item;
+  } else {
+    // 重名检查
+    if (allSkills.value.some(s => s.name === item.name)) {
+      ElMessage.warning('已存在同名技能，请换个名字');
+      return;
+    }
+    userSkills.value.push(item);
+  }
+  saveUserSkills();
+  skillFormVisible.value = false;
+  ElMessage.success(skillEditIndex.value >= 0 ? '技能已更新' : `技能「${item.name}」已添加`);
+};
+
+const removeUserSkill = (index: number) => {
+  const skill = userSkills.value[index];
+  ElMessageBox.confirm(`确定删除技能「${skill.name}」吗？`, '删除技能', { type: 'warning' })
+    .then(() => {
+      userSkills.value.splice(index, 1);
+      saveUserSkills();
+      ElMessage.success('已删除');
+    })
+    .catch(() => {});
+};
+
+// 导出单个技能为 .json 技能包文件（分享给他人）
+const exportSkill = (skill: Skill) => {
+  const pack = {
+    skillpack: 'legal-qa-skill',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    icon: skill.icon, name: skill.name, desc: skill.desc,
+    action: skill.action, text: skill.text || '',
+    cursorBefore: skill.cursorBefore ?? 0
+  };
+  const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `skill-${skill.name.replace(/[\\/:*?"<>|\s]+/g, '_')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// 导入技能包文件
+const importPackInput = ref<HTMLInputElement | null>(null);
+const triggerImportPack = () => importPackInput.value?.click();
+
+const handleImportPack = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ''; // 允许重复选择同一文件
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const pack = JSON.parse(String(reader.result));
+      if (pack.skillpack !== 'legal-qa-skill' || !pack.name || !pack.text) {
+        throw new Error('不是有效的技能包文件');
+      }
+      if (allSkills.value.some(s => s.name === pack.name)) {
+        ElMessage.warning(`已存在同名技能「${pack.name}」，导入前请先删除或重命名`);
+        return;
+      }
+      userSkills.value.push({
+        icon: pack.icon || '✨',
+        name: String(pack.name),
+        desc: pack.desc || '来自技能包',
+        action: pack.action === 'send' ? 'send' : 'prompt',
+        text: String(pack.text),
+        cursorBefore: Number(pack.cursorBefore) || 0
+      });
+      saveUserSkills();
+      ElMessage.success(`技能「${pack.name}」导入成功`);
+    } catch (e: any) {
+      ElMessage.error(e.message || '技能包解析失败，请检查文件内容');
+    }
+  };
+  reader.readAsText(file);
+};
 
 // 使用技能：可互动按钮的统一入口
 const useSkill = async (skill: Skill) => {
@@ -520,6 +749,44 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.skill-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px;
+}
+.skill-header .session-title { padding: 0; font-size: 12px; }
+
+.skill-header-actions { display: flex; gap: 6px; }
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.skill-mini-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #0A9AAE;
+  background: #ecfeff;
+  border: 1px solid #a5e3ec;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.skill-mini-btn:hover { background: #0A9AAE; color: white; border-color: #0A9AAE; }
+
+.skill-tip {
+  padding: 8px 12px 0;
+  font-size: 10px;
+  color: #9ca3af;
+  line-height: 1.4;
+}
+
 .skill-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -527,7 +794,13 @@ onMounted(() => {
   padding: 0 12px;
 }
 
+.skill-btn-wrap {
+  position: relative;
+  display: flex;
+}
+
 .skill-btn {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -569,6 +842,98 @@ onMounted(() => {
   color: #9ca3af;
   line-height: 1.2;
 }
+
+/* 卡片右上角操作区（hover 浮现） */
+.skill-actions {
+  position: absolute;
+  top: -7px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.skill-btn-wrap:hover .skill-actions { opacity: 1; }
+
+.skill-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #e5e7eb;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.skill-tag.mine { background: #d1fae5; color: #059669; }
+
+.skill-op {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: all 0.15s;
+}
+.skill-op:hover { border-color: #0A9AAE; color: #0A9AAE; }
+.skill-op.danger:hover { border-color: #ef4444; color: #ef4444; }
+
+/* 技能编辑弹窗表单 */
+.skill-form { display: flex; flex-direction: column; gap: 14px; }
+.skill-form-row { display: flex; gap: 12px; }
+.skill-form-field { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.skill-form-field label { font-size: 12px; color: #606266; font-weight: 600; }
+.skill-form-field input[type="text"],
+.skill-form-field input:not([type]),
+.skill-form-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.skill-form-field input:focus,
+.skill-form-field textarea:focus { outline: none; border-color: #0A9AAE; }
+.icon-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.icon-preset {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.icon-preset:hover { border-color: #0A9AAE; }
+.icon-preset.active { border-color: #0A9AAE; background: #ecfeff; box-shadow: 0 0 0 2px rgba(10,154,174,0.15); }
+.radio-line { display: flex; flex-direction: column; gap: 6px; }
+.radio-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #303133; font-weight: 400 !important; cursor: pointer; }
+.cursor-preview {
+  font-size: 12px;
+  color: #303133;
+  background: #f8fafc;
+  border: 1px dashed #d4d7de;
+  border-radius: 6px;
+  padding: 6px 8px;
+  line-height: 1.5;
+  word-break: break-all;
+  max-height: 64px;
+  overflow: auto;
+}
+.cursor-mark { color: #0A9AAE; font-weight: 700; animation: cursor-blink 1s steps(1) infinite; }
+@keyframes cursor-blink { 50% { opacity: 0; } }
 
 .session-title {
   padding: 12px 16px 8px;
