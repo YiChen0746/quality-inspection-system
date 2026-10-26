@@ -656,11 +656,137 @@ const getContractTemplates = async (req, res) => {
   }
 };
 
+// ==================== 二轮补充修改（风险评估后 AI 修订） ====================
+// POST /api/contract_revise
+// body: { mode: 'direct'|'guide', contractText, suggestions: [], risks: [] }
+// direct: 智能体直接改全文，返回 { revisedText, changeSummary }
+// guide:  AI 辅助逐条修改，返回 { items: [{ original, revised, explain }] }
+const reviseContract = async (req, res) => {
+  try {
+    const { mode = 'direct', contractText = '', suggestions = [], risks = [] } = req.body;
+
+    if (!contractText || !contractText.trim()) {
+      return res.status(400).json({ err_code: 400, message: '合同内容不能为空' });
+    }
+    if (!suggestions.length && !risks.length) {
+      return res.status(400).json({ err_code: 400, message: '没有可用的修改建议' });
+    }
+
+    const clipText = String(contractText).slice(0, 6000);
+    const suggestionList = suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    const riskList = risks.map((r, i) => `${i + 1}. ${r}`).join('\n');
+
+    if (mode === 'guide') {
+      // AI 辅助模式：逐条给出 原文 → 改后 → 理由
+      const systemPrompt = '你是一名合同修订助手。针对每条修改建议，从合同原文中定位需要修改的句子，给出修改后的句子和修改理由。只输出 JSON，不要 markdown 代码块。';
+      const prompt = `合同原文：
+${clipText}
+
+风险评估发现的问题：
+${riskList || '（无）'}
+
+修改建议：
+${suggestionList}
+
+请针对每条建议输出 JSON：{"items":[{"original":"合同原文中需要修改的原句（必须在原文中逐字存在，20-100字）","revised":"修改后的句子","explain":"一句话说明改了什么、为什么改"}]}
+如果某条建议在原文中找不到对应句子（属于缺失条款），original 留空字符串，revised 写应补充的完整条款句子，explain 说明"补充新增"。`;
+
+      const raw = await callLLM(prompt, { maxTokens: 2500, temperature: 0.3, systemPrompt });
+      if (!raw) {
+        return res.status(500).json({ err_code: 500, message: 'AI 修订服务暂时不可用，请稍后重试' });
+      }
+      // 剥壳解析
+      let cleaned = raw.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/m, '').trim();
+      let items = [];
+      const pushItem = (o) => {
+        if (o && (o.original !== undefined || o.revised !== undefined) && (String(o.original || '') || String(o.revised || ''))) {
+          items.push({
+            original: String(o.original || ''),
+            revised: String(o.revised || ''),
+            explain: String(o.explain || '').slice(0, 200)
+          });
+        }
+      };
+      try {
+        const obj = JSON.parse(cleaned);
+        if (Array.isArray(obj.items)) obj.items.forEach(pushItem);
+        else if (Array.isArray(obj)) {
+          // 兼容模型输出 [{ items: [...] }] 外层数组包裹的情况
+          obj.forEach(el => {
+            if (el && Array.isArray(el.items)) el.items.forEach(pushItem);
+            else pushItem(el);
+          });
+        }
+      } catch (e) {
+        // JSON 可能被截断：逐个提取平衡的 {...} 对象再解析
+        const extractJsonObjects = (text) => {
+          const objs = [];
+          let depth = 0, start = -1, inStr = false, esc = false;
+          for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            if (inStr) {
+              if (esc) esc = false;
+              else if (ch === '\\') esc = true;
+              else if (ch === '"') inStr = false;
+              continue;
+            }
+            if (ch === '"') { inStr = true; continue; }
+            if (ch === '{') { if (depth === 0) start = i; depth++; }
+            else if (ch === '}') { depth--; if (depth === 0 && start !== -1) { objs.push(text.slice(start, i + 1)); start = -1; } }
+          }
+          return objs;
+        };
+        extractJsonObjects(cleaned).forEach(seg => {
+          try { pushItem(JSON.parse(seg)); } catch (e2) { /* 跳过坏块 */ }
+        });
+      }
+      items = items.slice(0, 8);
+      return res.status(200).json({ err_code: 0, data: { mode: 'guide', items } });
+    }
+
+    // direct 模式：智能体直接改全文
+    const systemPrompt = '你是一名专业的合同修订智能体。你要根据风险评估建议直接修订合同全文：保持原有结构和条款编号不变，只修改需要修改的条款，缺失的条款在合适位置补充。语言规范、严谨。';
+    const prompt = `合同原文：
+${clipText}
+
+风险评估发现的问题：
+${riskList || '（无）'}
+
+修改建议：
+${suggestionList}
+
+请输出修订后的合同全文（不要 markdown，不要解释）。输出完毕后，另起一行输出分隔符 ===CHANGES=== ，再换行用 3-5 条简短中文说明你改了哪些地方，每条一行，格式如"1. 补充了房屋维修责任条款"。`;
+
+    const raw = await callLLM(prompt, { maxTokens: 4000, temperature: 0.3, systemPrompt });
+    if (!raw) {
+      return res.status(500).json({ err_code: 500, message: 'AI 修订服务暂时不可用，请稍后重试' });
+    }
+
+    const sepIdx = raw.indexOf('===CHANGES===');
+    let revisedText = raw;
+    let changeSummary = '';
+    if (sepIdx !== -1) {
+      revisedText = raw.slice(0, sepIdx).trim();
+      changeSummary = raw.slice(sepIdx + '===CHANGES==='.length).trim();
+    }
+    revisedText = revisedText.replace(/^```[a-z]*\s*/im, '').replace(/```\s*$/m, '').trim();
+
+    return res.status(200).json({
+      err_code: 0,
+      data: { mode: 'direct', revisedText, changeSummary }
+    });
+  } catch (error) {
+    console.error('[contract-revise] error:', error);
+    return res.status(500).json({ err_code: 500, message: '服务器错误，请稍后重试' });
+  }
+};
+
 module.exports = {
   generateContract,
   exportContractDocx,
   exportContractPdf,
   getContractTemplates,
   getGuidance,
-  getAutocomplete
+  getAutocomplete,
+  reviseContract
 };

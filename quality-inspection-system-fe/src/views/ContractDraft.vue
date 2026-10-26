@@ -307,6 +307,15 @@
                   <li v-for="(s, i) in riskScore.suggestions" :key="'s'+i">{{ s }}</li>
                 </ul>
               </div>
+
+              <!-- 二轮补充修改入口 -->
+              <div class="revise-entry">
+                <button class="btn-revise" :disabled="isRevising" @click="openReviseDialog">
+                  <span v-if="isRevising">AI 修改中...</span>
+                  <span v-else>🔄 二轮补充修改（AI 按建议修改）</span>
+                </button>
+                <div class="revise-tip">针对以上风险点和建议，让 AI 帮你补充修订合同</div>
+              </div>
             </div>
 
             <div class="contract-content">
@@ -383,6 +392,91 @@
       </el-button>
     </template>
   </el-dialog>
+
+  <!-- 二轮补充修改弹窗 -->
+  <el-dialog
+    v-model="reviseDialogVisible"
+    title="二轮补充修改"
+    width="640px"
+    :close-on-click-modal="false"
+    @closed="resetReviseState"
+  >
+    <!-- 第一步：选择修改方式 -->
+    <div v-if="reviseStep === 'choose'" class="revise-choose">
+      <div class="revise-mode-card" @click="startRevise('direct')">
+        <div class="mode-icon">🤖</div>
+        <div class="mode-text">
+          <div class="mode-title">智能体直接修改</div>
+          <div class="mode-desc">AI 根据风险建议自动修订全文，改完给你确认</div>
+        </div>
+        <div class="mode-arrow">→</div>
+      </div>
+      <div class="revise-mode-card" @click="startRevise('guide')">
+        <div class="mode-icon">✍️</div>
+        <div class="mode-text">
+          <div class="mode-title">AI 辅助逐条修改</div>
+          <div class="mode-desc">AI 给出每处"原文 → 改后"的修改说明，由你逐条采纳</div>
+        </div>
+        <div class="mode-arrow">→</div>
+      </div>
+    </div>
+
+    <!-- direct：智能体改完，等用户确认 -->
+    <div v-else-if="reviseStep === 'direct'" v-loading="isRevising" class="revise-direct">
+      <template v-if="!isRevising && reviseResult">
+        <div class="revise-summary">
+          <div class="summary-title">AI 修改说明：</div>
+          <pre class="summary-content">{{ reviseResult.changeSummary || '已按建议完成修订' }}</pre>
+        </div>
+        <div class="revise-preview-title">修订后全文预览：</div>
+        <div class="revise-preview">{{ reviseResult.revisedText }}</div>
+        <div class="revise-confirm-tip">AI 已按风险建议修改完成，是否应用这份修订版？</div>
+      </template>
+    </div>
+
+    <!-- guide：逐条采纳 -->
+    <div v-else-if="reviseStep === 'guide'" v-loading="isRevising" class="revise-guide">
+      <template v-if="!isRevising">
+        <div v-if="guideItems.length === 0" class="guide-empty">AI 未能给出具体修改项，建议使用"智能体直接修改"模式</div>
+        <div
+          v-for="(item, idx) in guideItems"
+          :key="idx"
+          class="guide-item"
+          :class="{ applied: guideApplied.includes(idx) }"
+        >
+          <div class="guide-explain">{{ idx + 1 }}. {{ item.explain }}</div>
+          <div v-if="item.original" class="guide-diff">
+            <div class="diff-row old"><span class="diff-tag">原文</span>{{ item.original }}</div>
+            <div class="diff-row new"><span class="diff-tag">改为</span>{{ item.revised }}</div>
+          </div>
+          <div v-else class="guide-diff">
+            <div class="diff-row new"><span class="diff-tag">补充</span>{{ item.revised }}</div>
+          </div>
+          <div class="guide-actions">
+            <button v-if="!guideApplied.includes(idx)" class="btn-adopt" @click="applyGuideItem(idx)">采纳</button>
+            <span v-else class="adopted-mark">✓ 已采纳</span>
+          </div>
+        </div>
+        <div v-if="guideApplied.length" class="guide-applied-tip">已采纳 {{ guideApplied.length }} / {{ guideItems.length }} 条修改，已同步到合同正文</div>
+      </template>
+    </div>
+
+    <template #footer>
+      <template v-if="reviseStep === 'choose'">
+        <el-button @click="reviseDialogVisible = false">取消</el-button>
+      </template>
+      <template v-else-if="reviseStep === 'direct'">
+        <el-button :disabled="isRevising" @click="reviseStep = 'choose'">返回</el-button>
+        <el-button type="danger" plain :disabled="isRevising || !reviseResult" @click="reviseDialogVisible = false">放弃修改</el-button>
+        <el-button type="primary" :disabled="isRevising || !reviseResult" @click="applyDirectRevise">✓ 应用修改</el-button>
+      </template>
+      <template v-else-if="reviseStep === 'guide'">
+        <el-button :disabled="isRevising" @click="reviseStep = 'choose'">返回</el-button>
+        <el-button type="primary" :disabled="isRevising || !guideItems.length || guideApplied.length === guideItems.length" @click="applyAllGuideItems">全部采纳</el-button>
+        <el-button type="success" @click="reviseDialogVisible = false">完成</el-button>
+      </template>
+    </template>
+  </el-dialog>
 </template>
 
 <script>
@@ -415,6 +509,14 @@ export default {
       isExporting: false,
       riskScore: null,
       isScoring: false,
+
+      // ============ 二轮补充修改 ============
+      reviseDialogVisible: false,
+      reviseStep: 'choose',     // choose | direct | guide
+      isRevising: false,
+      reviseResult: null,       // direct 模式结果 { revisedText, changeSummary }
+      guideItems: [],           // guide 模式逐条修改项
+      guideApplied: [],         // 已采纳的索引
 
       // ============ 起草指引 & 自动补全 ============
       activeField: '',
@@ -520,6 +622,117 @@ export default {
       } finally {
         this.isScoring = false;
       }
+    },
+
+    // ==================== 二轮补充修改 ====================
+
+    openReviseDialog() {
+      if (!this.currentContract?.contractContent?.trim()) {
+        ElMessage.warning('请先生成合同再进行二轮修改');
+        return;
+      }
+      this.reviseStep = 'choose';
+      this.reviseDialogVisible = true;
+    },
+
+    resetReviseState() {
+      this.reviseStep = 'choose';
+      this.reviseResult = null;
+      this.guideItems = [];
+      this.guideApplied = [];
+      this.isRevising = false;
+    },
+
+    async startRevise(mode) {
+      this.isRevising = true;
+      this.reviseStep = mode;
+      try {
+        const response = await fetch('/api/contract_revise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            mode,
+            contractText: this.currentContract.contractContent,
+            suggestions: this.riskScore?.suggestions || [],
+            risks: this.riskScore?.risks || []
+          })
+        });
+        const data = await response.json();
+        if (data.err_code === 0) {
+          if (mode === 'direct') {
+            this.reviseResult = {
+              revisedText: data.data.revisedText,
+              changeSummary: data.data.changeSummary
+            };
+          } else {
+            this.guideItems = data.data.items || [];
+          }
+        } else {
+          ElMessage.error(data.message || 'AI 修订失败');
+          this.reviseStep = 'choose';
+        }
+      } catch (error) {
+        console.error('二轮修改失败:', error);
+        ElMessage.error('网络错误，请稍后重试');
+        this.reviseStep = 'choose';
+      } finally {
+        this.isRevising = false;
+      }
+    },
+
+    // direct 模式：应用修订全文
+    applyDirectRevise() {
+      if (!this.reviseResult?.revisedText) return;
+      this.currentContract.contractContent = this.reviseResult.revisedText;
+      this.riskScore = null; // 修改后旧评分失效，提示重新评分
+      this.reviseDialogVisible = false;
+      ElMessage.success('修订版已应用，建议重新进行风险评估');
+    },
+
+    // guide 模式：逐条采纳
+    applyGuideItem(idx) {
+      const item = this.guideItems[idx];
+      if (!item) return;
+      const content = this.currentContract.contractContent;
+      if (item.original && content.includes(item.original)) {
+        // 原文替换
+        this.currentContract.contractContent = content.replace(item.original, item.revised);
+      } else if (!item.original) {
+        // 补充新增：追加到最后一个条款之后（正文末尾）
+        this.currentContract.contractContent = content.trimEnd() + '\n' + item.revised + '\n';
+      } else {
+        // 原文未逐字命中，宽松匹配（忽略空白差异）
+        const norm = s => String(s).replace(/\s+/g, '');
+        const raw = String(content);
+        const target = norm(item.original);
+        let found = false;
+        // 滑动窗口找原文中连续片段
+        for (let i = 0; i < raw.length && !found; i++) {
+          for (let j = i + 10; j <= raw.length; j++) {
+            if (norm(raw.slice(i, j)) === target) {
+              this.currentContract.contractContent = raw.slice(0, i) + item.revised + raw.slice(j);
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          ElMessage.warning(`第 ${idx + 1} 条未在原文中定位到，已作为补充条款追加`);
+          this.currentContract.contractContent = raw.trimEnd() + '\n' + item.revised + '\n';
+        }
+      }
+      this.guideApplied.push(idx);
+      ElMessage.success(`第 ${idx + 1} 条修改已应用`);
+    },
+
+    // guide 模式：全部采纳
+    applyAllGuideItems() {
+      for (let i = 0; i < this.guideItems.length; i++) {
+        if (!this.guideApplied.includes(i)) {
+          this.applyGuideItem(i);
+        }
+      }
+      ElMessage.success('全部修改已应用');
     },
 
     // 表单验证
@@ -1462,5 +1675,122 @@ export default {
   background: #67c23a;
   color: white;
   border-color: #67c23a;
+}
+/* ============ 二轮补充修改 ============ */
+.revise-entry {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e4e7ed;
+  text-align: center;
+}
+.btn-revise {
+  width: 100%;
+  padding: 9px 14px;
+  background: linear-gradient(135deg, #409eff, #67c23a);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-revise:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+.btn-revise:disabled { opacity: 0.6; cursor: not-allowed; }
+.revise-tip { font-size: 11px; color: #909399; margin-top: 6px; }
+
+/* 弹窗：模式选择 */
+.revise-choose { display: flex; flex-direction: column; gap: 12px; padding: 8px 4px; }
+.revise-mode-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.revise-mode-card:hover { border-color: #409eff; background: #ecf5ff; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(64,158,255,0.15); }
+.mode-icon { font-size: 30px; }
+.mode-text { flex: 1; }
+.mode-title { font-size: 15px; font-weight: 600; color: #303133; margin-bottom: 4px; }
+.mode-desc { font-size: 12px; color: #909399; line-height: 1.5; }
+.mode-arrow { color: #c0c4cc; font-size: 18px; }
+
+/* 弹窗：direct 确认 */
+.revise-direct { min-height: 200px; }
+.revise-summary { background: #f0f9eb; border: 1px solid #e1f3d8; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+.summary-title { font-size: 13px; font-weight: 600; color: #67c23a; margin-bottom: 6px; }
+.summary-content { font-size: 12px; color: #606266; line-height: 1.7; white-space: pre-wrap; margin: 0; font-family: inherit; }
+.revise-preview-title { font-size: 13px; font-weight: 600; color: #303133; margin-bottom: 6px; }
+.revise-preview {
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fafbfc;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.revise-confirm-tip { text-align: center; font-size: 13px; color: #e6a23c; margin-top: 12px; font-weight: 600; }
+
+/* 弹窗：guide 逐条 */
+.revise-guide { max-height: 420px; overflow-y: auto; min-height: 200px; }
+.guide-empty { text-align: center; color: #909399; font-size: 13px; padding: 40px 0; }
+.guide-item {
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  transition: all 0.2s;
+}
+.guide-item.applied { border-color: #e1f3d8; background: #fafdf7; opacity: 0.75; }
+.guide-explain { font-size: 13px; font-weight: 600; color: #303133; margin-bottom: 8px; }
+.guide-diff { display: flex; flex-direction: column; gap: 6px; }
+.diff-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 7px 10px;
+  border-radius: 6px;
+}
+.diff-row.old { background: #fef0f0; color: #a8616a; }
+.diff-row.new { background: #f0f9eb; color: #5a8a4a; }
+.diff-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  height: fit-content;
+}
+.diff-row.old .diff-tag { background: #fde2e2; color: #c45656; }
+.diff-row.new .diff-tag { background: #d1edc4; color: #529b2e; }
+.guide-actions { text-align: right; margin-top: 8px; }
+.btn-adopt {
+  padding: 5px 16px;
+  background: #409eff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-adopt:hover { background: #337ecc; }
+.adopted-mark { font-size: 12px; color: #67c23a; font-weight: 600; }
+.guide-applied-tip {
+  text-align: center;
+  font-size: 12px;
+  color: #67c23a;
+  background: #f0f9eb;
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 4px;
 }
 </style>
