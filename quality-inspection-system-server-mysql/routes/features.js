@@ -8,6 +8,7 @@ const { Contract } = require('../models');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/db');
 const { extractTextFromDocxBuffer } = require('../utils/extract-text');
+const { loadKnowledgeSources, retrieveKnowledge, inferContractCategory } = require('../utils/knowledge-service');
 
 // 通用 OpenAI 兼容大模型配置（DeepSeek / 智谱GLM / 硅基流动 / 本地Ollama 均可接入）
 const LLM_BASE = process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
@@ -61,77 +62,207 @@ const getExpiringContracts = async (req, res) => {
 
 // ================= 合同风险评分 ================
 // POST /api/score_contract  { contractContent, contractName, contractId? }
-// 调用大模型对合同做风险评估，要求模型只返回 JSON
+// 设计要点：
+// 1) 全文分段评分，不再只取前 6000 字；
+// 2) 接入三源知识库，风险点必须标注可追溯的依据编号；
+// 3) 模型失败/解析失败不再返回默认 50 分，改为明确报错，避免把假结论当真；
+// 4) 未覆盖段落、失败段落显式写入结论，交由用户决定是否人工复核。
+const SCORE_CHUNK_SIZE = 10000;
+const SCORE_MAX_CHUNKS = 4;
+const SCORE_LLM_TIMEOUT = 60000;
+
+// 按行切分，尽量保持条款完整；超长单行硬切，避免超出上下文
+function splitForScoring(text, size = SCORE_CHUNK_SIZE) {
+  const src = String(text || '');
+  const lines = src.split(/\r?\n/);
+  const chunks = [];
+  let buf = '';
+  lines.forEach((line) => {
+    if (buf && buf.length + line.length + 1 > size) {
+      chunks.push(buf);
+      buf = '';
+    }
+    buf += line + '\n';
+    while (buf.length > size) {
+      chunks.push(buf.slice(0, size));
+      buf = buf.slice(size);
+    }
+  });
+  if (buf.trim()) chunks.push(buf);
+  return chunks.length ? chunks : [src];
+}
+
+// 三源知识库检索：为评分提供可引用的依据条目（带编号）
+async function buildScoringEvidence(content, contractName) {
+  try {
+    const sources = await loadKnowledgeSources();
+    const categoryHint = inferContractCategory(contractName);
+    const query = `${contractName || ''} ${String(content || '').slice(0, 800)}`;
+    const items = retrieveKnowledge(query, sources, 8, categoryHint) || [];
+    return items.map((item, i) => ({
+      id: `L${i + 1}`,
+      title: item.title || '未命名条目',
+      category: item.category || '',
+      content: String(item.content || '').slice(0, 220),
+      source: item.source || '',
+      effectiveDate: item.effectiveDate || '',
+      type: item.type || 'law'
+    }));
+  } catch (error) {
+    console.warn('评分检索知识库失败（将不带引用依据继续）:', error.message);
+    return [];
+  }
+}
+
+function formatEvidenceForPrompt(evidence) {
+  if (!evidence || !evidence.length) {
+    return '（本次未检索到可引用条文：请只描述风险现象与后果，不得编造法条名称或条号，依据处统一写“依据：未检索到条文，建议人工核实”）';
+  }
+  return evidence.map((e) => {
+    const typeLabel = e.type === 'history' ? '历史案例' : e.type === 'template' ? '标准模板' : '法规';
+    const meta = [e.source, e.effectiveDate ? `${e.effectiveDate} 施行` : ''].filter(Boolean).join('，');
+    return `[${e.id}]【${typeLabel}】${e.title}（${e.category}${meta ? '；' + meta : ''}）：${e.content}`;
+  }).join('\n');
+}
+
+function buildScorePrompt(chunk, contractName, evidenceText, partInfo) {
+  return `你是资深合同风控法务，请对下面这段合同内容做风险评估。
+
+合同名称：${contractName || '未命名合同'}
+${partInfo ? `本段为全文第 ${partInfo.index}/${partInfo.total} 段，只评本段，不要推测其他段落的内容。` : ''}
+
+【可引用依据】（只能使用下列编号，禁止编造条文）
+${evidenceText}
+
+【合同内容】
+${chunk}
+
+只输出 JSON，不要 markdown 代码块，不要任何多余文字：
+{"score":0到100的整数,"level":"低|中|高","risks":["风险点（依据：L2）"],"suggestions":["修改建议"]}
+
+规则：
+1) score 越高风险越大：0-40 为低风险，41-70 为中风险，71-100 为高风险；
+2) risks 最多 5 条、suggestions 最多 4 条；每条必须指明本段中的具体表述或本段缺失的必备条款，不得编造本段未涉及的事实；若本段确无实质风险，risks 返回空数组，不要为凑数量编造问题；
+3) 每条 risks 末尾用（依据：Lx）标注引用的依据编号；无对应条文时写（依据：未检索到条文，建议人工核实）；
+4) 不得出现上面未列出的依据编号或法条名称。`;
+}
+
+// 单段评分：返回 null 表示本次失败（由调用方决定是否中断）
+async function callScoreLLM(prompt) {
+  const response = await axios.post(`${LLM_BASE}/chat/completions`, {
+    model: LLM_MODEL,
+    messages: [{ role: 'user', content: prompt }],
+    stream: false,
+    max_tokens: 1400,
+    temperature: 0.2
+  }, {
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${LLM_KEY}`
+    },
+    timeout: SCORE_LLM_TIMEOUT
+  });
+
+  const raw = response.data?.choices?.[0]?.message?.content || '';
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw.substring(start, end + 1));
+  } catch (e) {
+    return null;
+  }
+  if (!parsed || typeof parsed.score !== 'number' || Number.isNaN(parsed.score)) return null;
+
+  return {
+    score: Math.max(0, Math.min(100, Math.round(parsed.score))),
+    risks: Array.isArray(parsed.risks) ? parsed.risks.map(String).filter(Boolean) : [],
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(String).filter(Boolean) : []
+  };
+}
+
 const scoreContract = async (req, res) => {
   try {
-    const { contractContent, contractName, contractId } = req.body;
+    const { contractContent, contractName, contractId } = req.body || {};
 
-    if (!contractContent) {
+    if (!contractContent || !String(contractContent).trim()) {
       return res.status(400).json({
         err_code: 400,
         message: '合同内容不能为空'
       });
     }
 
-    const prompt = `你是一名专业的法务风控专家。请对以下合同进行风险评估。
+    const content = String(contractContent);
+    const chunks = splitForScoring(content);
+    const pending = chunks.slice(0, SCORE_MAX_CHUNKS);
+    const truncated = chunks.length > pending.length;
 
-合同名称：${contractName || '未命名合同'}
+    const evidence = await buildScoringEvidence(content, contractName);
+    const evidenceText = formatEvidenceForPrompt(evidence);
 
-合同内容：
-${contractContent.substring(0, 6000)}
-
-请评估该合同的风险程度，并严格按照以下 JSON 格式返回结果（只输出 JSON，不要 markdown 代码块，不要任何其他文字）：
-{"score": 0到100的整数（分数越高风险越大）, "level": "低|中|高", "risks": ["风险点1", "风险点2"], "suggestions": ["建议1", "建议2"]}
-
-评分参考：0-40 为低风险，41-70 为中风险，71-100 为高风险。risks 和 suggestions 各列出 2-5 条。`;
-
-    let scoreData = null;
-
-    try {
-      const response = await axios.post(`${LLM_BASE}/chat/completions`, {
-        model: LLM_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        stream: false,
-        max_tokens: 1500,
-        temperature: 0.3
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${LLM_KEY}`
-        },
-        timeout: 90000
-      });
-
-      const raw = response.data.choices?.[0]?.message?.content || '';
-      console.log('风险评分AI原始返回:', raw);
-
-      // 容错解析：提取第一个 { 到最后一个 } 之间的内容再 JSON.parse
-      const start = raw.indexOf('{');
-      const end = raw.lastIndexOf('}');
-      if (start !== -1 && end !== -1 && end > start) {
-        scoreData = JSON.parse(raw.substring(start, end + 1));
+    const results = [];
+    const failedParts = [];
+    for (let i = 0; i < pending.length; i += 1) {
+      const partInfo = pending.length > 1 ? { index: i + 1, total: pending.length } : null;
+      try {
+        const partResult = await callScoreLLM(buildScorePrompt(pending[i], contractName, evidenceText, partInfo));
+        if (partResult) results.push(partResult);
+        else failedParts.push(i + 1);
+      } catch (error) {
+        console.error(`合同评分第 ${i + 1} 段调用失败:`, error.message);
+        failedParts.push(i + 1);
       }
-    } catch (llmError) {
-      console.error('调用大模型评分失败:', llmError.message);
     }
 
-    // 解析失败或调用失败时给默认分
-    if (!scoreData || typeof scoreData.score !== 'number') {
-      scoreData = {
-        score: 50,
-        level: '中',
-        risks: ['AI 评分暂时不可用，以下为默认评估结果', '建议人工复核合同条款'],
-        suggestions: ['请仔细检查合同中的违约责任和赔偿条款', '建议咨询专业法务人员']
-      };
+    // 全部段落失败：明确报错，不再用默认分冒充结果
+    if (!results.length) {
+      return res.status(502).json({
+        err_code: 502,
+        message: '风险评估失败：模型服务暂不可用，本次未生成任何评分结论，请稍后重试'
+      });
     }
 
-    // 规范化字段
-    scoreData.score = Math.max(0, Math.min(100, Math.round(scoreData.score)));
-    if (!['低', '中', '高'].includes(scoreData.level)) {
-      scoreData.level = scoreData.score <= 40 ? '低' : (scoreData.score <= 70 ? '中' : '高');
+    // 合并：最差条款决定整体风险，同时参考各段均值
+    const maxScore = Math.max(...results.map((r) => r.score));
+    const avgScore = Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length);
+    const score = results.length === 1 ? maxScore : Math.round(maxScore * 0.7 + avgScore * 0.3);
+    const level = score <= 40 ? '低' : score <= 70 ? '中' : '高';
+
+    const risks = [];
+    const suggestions = [];
+    results.forEach((r) => {
+      r.risks.forEach((item) => { if (!risks.includes(item)) risks.push(item); });
+      r.suggestions.forEach((item) => { if (!suggestions.includes(item)) suggestions.push(item); });
+    });
+
+    // 覆盖字数按原文长度封顶，避免按行累加末尾换行导致的轻微虚高
+    const coveredChars = Math.min(content.length, pending.reduce((sum, c) => sum + c.length, 0));
+    // 覆盖说明必须保留在结论里（放在最前面，避免被条数上限截掉）
+    const notices = [];
+    if (truncated) {
+      notices.push(`本份合同较长，仅评估了前 ${pending.length} 段（约 ${coveredChars} 字），其余内容未纳入结论，请人工复核剩余条款（依据：未检索到条文，建议人工核实）`);
     }
-    if (!Array.isArray(scoreData.risks)) scoreData.risks = [];
-    if (!Array.isArray(scoreData.suggestions)) scoreData.suggestions = [];
+    failedParts.forEach((part) => {
+      notices.push(`第 ${part} 段内容评估失败，本结论未覆盖该部分，请人工复核（依据：未检索到条文，建议人工核实）`);
+    });
+
+    const scoreData = {
+      score,
+      level,
+      risks: [...notices, ...risks].slice(0, 8),
+      suggestions: suggestions.slice(0, 6),
+      evidence,
+      meta: {
+        totalChars: content.length,
+        coveredChars,
+        chunks: chunks.length,
+        evaluated: results.length,
+        truncated,
+        failedParts
+      }
+    };
 
     // 若传了 contractId，把评分写回 contracts 表
     if (contractId) {
@@ -158,6 +289,7 @@ ${contractContent.substring(0, 6000)}
     });
   }
 };
+
 
 // ================= 数据统计面板 ================
 // GET /api/dashboard_stats

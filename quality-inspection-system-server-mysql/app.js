@@ -61,8 +61,8 @@ app.use(session({
 }));
 
 // 解析请求体（express 自带，无需重复引入 body-parser）
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // 挂载路由
 app.use('/api', router);
@@ -101,6 +101,14 @@ app.use(function(err, req, res, next) {
     });
   }
   
+  // 请求体过大：给出可读提示，而不是抛出英文原始信息
+  if (err && (err.type === 'entity.too.large' || err.code === 'LIMIT_FILE_SIZE')) {
+    return res.status(413).json({
+      err_code: 413,
+      message: '提交的内容过大，请删除合同中的图片或附件后重试'
+    });
+  }
+
   // 其他错误
   res.status(500).json({
     err_code: 500,

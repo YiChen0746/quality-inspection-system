@@ -91,9 +91,9 @@ function retrieveKnowledge(query, sources = {}, lawTopK = 4, categoryHint = '') 
     .filter((item) => {
       if (!categoryHint) return true;
       if (GENERAL_CATEGORIES.has(item.category)) return true;
-      // 分类名归一化匹配（如库内「服务/委托合同」对用户选的「服务合同」）
-      const parts = String(item.category || '').split('/');
-      return parts.some(p => p && (categoryHint.includes(p) || p.includes(categoryHint)));
+      // 知识库中的分类存在“服务/委托合同”这类复合写法，改为集合包含判断，避免全等比较误杀
+      const categories = String(item.category || '').split(/[\/、,，]/).map((x) => x.trim()).filter(Boolean);
+      return categories.includes(categoryHint);
     })
     .map((item) => ({ ...item, type: 'law' }));
 
@@ -112,13 +112,13 @@ function retrieveKnowledge(query, sources = {}, lawTopK = 4, categoryHint = '') 
   const merged = [...laws, ...history, ...templates].sort((a, b) => (b.score || 0) - (a.score || 0));
   if (!merged.length) return [];
 
-  // 相对阈值过滤：放宽比例，避免低分但相关的条目被第一名的高分全部砍掉
+  // 相对阈值过滤：通用性条款要求更高相关度，避免检索噪声
   const maxScore = merged[0].score;
   const GENERIC_CATEGORIES = new Set(['合同通则', '担保']);
   return merged
     .filter((item) => {
-      if (item.type !== 'law') return item.score >= maxScore * 0.35;
-      const ratio = GENERIC_CATEGORIES.has(item.category) ? 0.6 : 0.35;
+      if (item.type !== 'law') return item.score >= maxScore * 0.5;
+      const ratio = GENERIC_CATEGORIES.has(item.category) ? 0.8 : 0.5;
       return item.score >= maxScore * ratio;
     })
     .slice(0, 8);

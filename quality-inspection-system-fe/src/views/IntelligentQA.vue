@@ -168,6 +168,9 @@
           <el-divider>或</el-divider>
           <div class="share-label">方式二：选择 .json 技能包文件</div>
           <el-button @click="triggerImportPack">📂 选择文件</el-button>
+          <div style="margin-top:12px;font-size:12px;color:#909399;line-height:1.6;">
+            提示：技能内容由分享者提供，安装后请先确认其提示词是否与你的使用场景一致；技能只会填入或发送文本，不会自动调用接口改写你的数据。
+          </div>
         </div>
       </el-dialog>
     </div>
@@ -231,7 +234,7 @@ import { reactive, ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus';
 import Message from '@/components/Message/index.vue';
-import { getAuthHeaders } from '@Setup/storage/user.js';
+import { getAuthHeaders, getUserInfo } from '@Setup/storage/user.js';
 import {
   getIntelligentQAResultStream,
   getChatSessions,
@@ -279,7 +282,12 @@ interface Skill {
 
 // 技能包文件格式（可分享给他人导入，类似 GitHub 分享 gist）
 // { skillpack: "legal-qa-skill", version: 1, icon, name, desc, action, text, cursorBefore }
-const SKILLPACK_KEY = 'legal-qa-user-skills';
+// 自建技能按账号隔离存储，避免多人共用一台电脑时互相串数据
+const currentUserKey = () => {
+  const info: any = getUserInfo();
+  return String(info?.username || info?.userName || info?.name || info?.id || 'guest');
+};
+const skillPackKey = () => `legal-qa-user-skills:${currentUserKey()}`;
 
 const builtinSkills: Skill[] = [
   {
@@ -313,13 +321,20 @@ const builtinSkills: Skill[] = [
 // ============ 开源化：用户自建技能（localStorage 持久化，可导入导出分享） ============
 const userSkills = ref<Skill[]>([]);
 
+// 读取：优先读当前账号的键；旧版本单一键的数据做一次性迁移
 try {
-  const saved = localStorage.getItem(SKILLPACK_KEY);
-  if (saved) userSkills.value = JSON.parse(saved);
+  const scoped = localStorage.getItem(skillPackKey());
+  const legacy = localStorage.getItem('legal-qa-user-skills');
+  const raw = scoped || legacy;
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) userSkills.value = parsed;
+    if (!scoped && legacy) localStorage.setItem(skillPackKey(), legacy);
+  }
 } catch (e) { /* 忽略损坏数据 */ }
 
 const saveUserSkills = () => {
-  try { localStorage.setItem(SKILLPACK_KEY, JSON.stringify(userSkills.value)); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(skillPackKey(), JSON.stringify(userSkills.value)); } catch (e) { /* ignore */ }
 };
 
 // 展示列表 = 内置 + 自建
@@ -339,11 +354,23 @@ const skillForm = reactive<Skill>({
 
 const SKILL_ICON_PRESETS = ['✨', '⚠️', '⚖️', '🎓', '📊', '⏰', '📄', '🧾', '🔍', '💡', '🛡️', '📝'];
 
+// Fork 后的名字：默认加“（副本）”，重名时再追加序号
+const forkName = (name: string) => {
+  const base = `${name}（副本）`;
+  if (!allSkills.value.some(s => s.name === base)) return base;
+  let i = 2;
+  while (allSkills.value.some(s => s.name === `${name}（副本${i}）`)) i += 1;
+  return `${name}（副本${i}）`;
+};
+
 const openSkillForm = (skill?: Skill, index = -1) => {
   if (skill) {
     // 编辑自建技能，或从内置技能“Fork”一份来改
     Object.assign(skillForm, {
-      icon: skill.icon, name: skill.name, desc: skill.desc,
+      icon: skill.icon,
+      // Fork 内置技能时自动加“（副本）”，避免与内置同名被拦下
+      name: index >= 0 ? skill.name : forkName(skill.name),
+      desc: skill.desc,
       action: skill.action, text: skill.text || '', cursorBefore: skill.cursorBefore ?? 0
     });
     skillEditIndex.value = index;
@@ -427,16 +454,30 @@ const encodeSkillPack = (skill: Skill): string => {
 };
 
 const decodeSkillPack = (code: string): Skill => {
-  const raw = String(code || '').trim().replace(/\s+/g, '');
-  if (!raw.startsWith('LQA1:')) throw new Error('分享码格式不对，应以 LQA1: 开头');
-  const bin = atob(raw.slice(5));
-  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-  const pack = JSON.parse(new TextDecoder().decode(bytes));
-  if (pack.skillpack !== 'legal-qa-skill' || !pack.name || !pack.text) throw new Error('分享码内容无效');
+  const raw = String(code || '').trim().replace(/[\r\n\t]/g, '').replace(/ /g, '');
+  if (!raw) throw new Error('请先粘贴分享码');
+  if (!raw.startsWith('LQA1:')) throw new Error('分享码格式不对，应以 LQA1: 开头（请确认已完整复制）');
+  const body = raw.slice(5);
+  if (body.length < 16) throw new Error('分享码不完整，请让对方重新复制完整内容');
+
+  let bin = '';
+  try {
+    bin = atob(body);
+  } catch (e) {
+    throw new Error('分享码无法解码，可能在复制时丢失了字符，请重新复制');
+  }
+
+  let pack: any;
+  try {
+    pack = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))));
+  } catch (e) {
+    throw new Error('分享码内容已损坏，无法还原为技能');
+  }
+  if (pack.skillpack !== 'legal-qa-skill' || !pack.name || !pack.text) throw new Error('分享码内容无效，不是本系统的技能包');
   return {
     icon: pack.icon || '✨',
     name: String(pack.name),
-    desc: pack.desc || '来自分享码',
+    desc: pack.desc || '来自分享码（内容由分享者提供，请自行确认）',
     action: pack.action === 'send' ? 'send' : 'prompt',
     text: String(pack.text),
     cursorBefore: Number(pack.cursorBefore) || 0

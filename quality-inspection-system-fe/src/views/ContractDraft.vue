@@ -382,7 +382,7 @@
                   </template>
                 </el-progress>
                 <div class="score-level">
-                  <div class="level-label">风险等级{{ reviseRound > 0 ? `（第 ${reviseRound + 1} 轮评估）` : '' }}</div>
+                  <div class="level-label">风险分 {{ riskScore.score }}/100（分值越高越需关注）{{ reviseRound > 0 ? `｜第 ${reviseRound + 1} 轮评估` : '' }}</div>
                   <el-tag :type="riskScore.level === '高' ? 'danger' : (riskScore.level === '中' ? 'warning' : 'success')" size="large">
                     {{ riskScore.level }}风险
                   </el-tag>
@@ -403,6 +403,17 @@
                 <ul>
                   <li v-for="(s, i) in riskScore.suggestions" :key="'s'+i">{{ s }}</li>
                 </ul>
+              </div>
+
+              <!-- 评估范围（长合同分段评估的覆盖情况） -->
+              <div v-if="riskScore.meta" class="score-detail">
+                <div class="detail-title">评估范围：</div>
+                <div style="font-size:12px;color:#909399;line-height:1.7;">
+                  全文 {{ riskScore.meta.totalChars }} 字，已评估 {{ riskScore.meta.evaluated }}/{{ riskScore.meta.chunks }} 段（约 {{ riskScore.meta.coveredChars }} 字）
+                  <span v-if="riskCoverageIncomplete" style="color:#e6a23c;">
+                    — 有内容未纳入结论，导出前请人工复核对应条款
+                  </span>
+                </div>
               </div>
 
               <!-- 轮次进展提示 -->
@@ -679,6 +690,13 @@ export default {
       return this.riskScore.level === '低' ? 'export' : 'revise';
     },
 
+    // 评估是否覆盖了全文（长合同分段评估时可能未覆盖或部分失败）
+    riskCoverageIncomplete() {
+      const meta = this.riskScore?.meta;
+      if (!meta) return false;
+      return !!(meta.truncated || (meta.failedParts && meta.failedParts.length));
+    },
+
     // 四阶段流程条（填表 → 评分 → 修改 → 导出）
     stageSteps() {
       const order = ['filling', 'score', 'revise', 'export'];
@@ -711,11 +729,17 @@ export default {
         };
       }
       if (this.draftStage === 'export') {
+        const coverageTip = this.riskCoverageIncomplete
+          ? `注意：本次仅评估了合同的一部分（全文 ${this.riskScore.meta.totalChars} 字，已评估 ${this.riskScore.meta.evaluated}/${this.riskScore.meta.chunks} 段），未覆盖部分请人工复核后再定稿。`
+          : '';
+        const restTip = (this.riskScore?.risks?.length || 0) > 0
+          ? `仍有 ${this.riskScore.risks.length} 条提示项，可继续修改也可以直接导出。`
+          : '';
         return {
-          title: `✅ 合同已达低风险（${this.riskScore.score} 分）`,
-          hint: this.reviseRound > 0
-            ? `经过 ${this.reviseRound} 轮 AI 修改，合同已比较完善。可以导出 Word/PDF 定稿了。`
-            : '合同风险较低，可以导出 Word/PDF 定稿了。如仍想完善，可继续 AI 补充修改。',
+          title: `✅ 当前风险较低（${this.riskScore.score} 分）`,
+          hint: [coverageTip, this.reviseRound > 0
+            ? `经过 ${this.reviseRound} 轮 AI 修改，合同已比较完善。`
+            : '', restTip, '可以导出 Word/PDF 定稿了。如仍想完善，可继续 AI 补充修改。'].filter(Boolean).join(''),
           action: { text: '导出定稿', fn: this.showExportDialog }
         };
       }
@@ -909,16 +933,19 @@ export default {
             contractId: this.currentContract.contractInfo?.contractId
           })
         });
-        const data = await response.json();
-        if (data.err_code === 0) {
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.err_code === 0 && data.data) {
           this.riskScore = data.data;
           ElMessage.success('风险评分完成');
         } else {
-          ElMessage.error(data.message || '评分失败');
+          // 失败时不留任何分数，避免把默认分当成真实结论
+          this.riskScore = null;
+          ElMessage.error(data.message || `风险评分失败（HTTP ${response.status}），请稍后重试`);
         }
       } catch (error) {
         console.error('风险评分失败:', error);
-        ElMessage.error('网络错误，请稍后重试');
+        this.riskScore = null;
+        ElMessage.error('网络错误，本次未生成评分结论，请稍后重试');
       } finally {
         this.isScoring = false;
       }
@@ -997,50 +1024,121 @@ export default {
       ElMessage.success(`第 ${this.reviseRound} 轮修订已应用，请重新进行风险评估`);
     },
 
+    // 建立“去空白文本 → 原文下标”映射，定位由 O(n²) 降为 O(n)
+    buildNormalizedIndex(text) {
+      const raw = String(text || '');
+      let norm = '';
+      const map = [];
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        if (/\s/.test(ch)) continue;
+        norm += ch;
+        map.push(i);
+      }
+      return { raw, norm, map };
+    },
+
+    // 在原文中定位片段（忽略空白差异），返回 { start, end } 原文下标；找不到返回 null
+    locateInText(index, original) {
+      const rawText = String(original || '');
+      const target = rawText.replace(/\s+/g, '');
+      if (!target) return null;
+      // 过短片段容易误命中，只做精确匹配
+      if (target.length < 6) {
+        const pos = index.raw.indexOf(rawText);
+        return pos === -1 ? null : { start: pos, end: pos + rawText.length };
+      }
+      const k = index.norm.indexOf(target);
+      if (k === -1) return null;
+      return { start: index.map[k], end: index.map[k + target.length - 1] + 1 };
+    },
+
     // guide 模式：逐条采纳
     applyGuideItem(idx) {
       const item = this.guideItems[idx];
       if (!item) return;
-      const content = this.currentContract.contractContent;
-      if (item.original && content.includes(item.original)) {
-        // 原文替换
-        this.currentContract.contractContent = content.replace(item.original, item.revised);
-      } else if (!item.original) {
-        // 补充新增：追加到最后一个条款之后（正文末尾）
-        this.currentContract.contractContent = content.trimEnd() + '\n' + item.revised + '\n';
-      } else {
-        // 原文未逐字命中，宽松匹配（忽略空白差异）
-        const norm = s => String(s).replace(/\s+/g, '');
-        const raw = String(content);
-        const target = norm(item.original);
-        let found = false;
-        // 滑动窗口找原文中连续片段
-        for (let i = 0; i < raw.length && !found; i++) {
-          for (let j = i + 10; j <= raw.length; j++) {
-            if (norm(raw.slice(i, j)) === target) {
-              this.currentContract.contractContent = raw.slice(0, i) + item.revised + raw.slice(j);
-              found = true;
-              break;
-            }
-          }
-        }
-        if (!found) {
-          ElMessage.warning(`第 ${idx + 1} 条未在原文中定位到，已作为补充条款追加`);
-          this.currentContract.contractContent = raw.trimEnd() + '\n' + item.revised + '\n';
-        }
+      const raw = String(this.currentContract.contractContent || '');
+      const index = this.buildNormalizedIndex(raw);
+
+      if (!item.original) {
+        // 无原文的纯新增条款，明确追加到正文末尾
+        this.currentContract.contractContent = raw.trimEnd() + '\n' + item.revised + '\n';
+        this.riskScore = null; // 修改后旧评分失效
+        this.guideApplied.push(idx);
+        ElMessage.success(`第 ${idx + 1} 条补充条款已追加到正文末尾`);
+        return;
       }
+
+      const hit = this.locateInText(index, item.original);
+      if (!hit) {
+        // 定位不到时不再改动正文，避免把无关内容替换掉
+        ElMessage.warning(`第 ${idx + 1} 条未在原文中定位到，未做修改，请在正文中手动处理`);
+        return;
+      }
+      this.currentContract.contractContent = raw.slice(0, hit.start) + item.revised + raw.slice(hit.end);
+      this.riskScore = null; // 修改后旧评分失效
       this.guideApplied.push(idx);
       ElMessage.success(`第 ${idx + 1} 条修改已应用`);
     },
 
-    // guide 模式：全部采纳
+    // guide 模式：全部采纳（基于同一份原文快照定位，避免串行替换相互破坏）
     applyAllGuideItems() {
-      for (let i = 0; i < this.guideItems.length; i++) {
-        if (!this.guideApplied.includes(i)) {
-          this.applyGuideItem(i);
-        }
+      const raw = String(this.currentContract.contractContent || '');
+      if (!raw.trim()) {
+        ElMessage.warning('请先生成合同内容');
+        return;
       }
-      ElMessage.success('全部修改已应用');
+      const index = this.buildNormalizedIndex(raw);
+      const replaces = [];
+      const appends = [];
+      const missed = [];
+
+      this.guideItems.forEach((item, idx) => {
+        if (this.guideApplied.includes(idx)) return;
+        if (!item.original) {
+          appends.push({ idx, revised: item.revised });
+          return;
+        }
+        const hit = this.locateInText(index, item.original);
+        if (hit) replaces.push({ idx, start: hit.start, end: hit.end, revised: item.revised });
+        else missed.push(idx);
+      });
+
+      // 区间冲突检测：两条修改落在同一段原文时保留靠前一条，其余跳过并提示
+      replaces.sort((a, b) => a.start - b.start);
+      const accepted = [];
+      replaces.forEach((job) => {
+        const overlap = accepted.some((x) => job.start < x.end && job.end > x.start);
+        if (overlap) missed.push(job.idx);
+        else accepted.push(job);
+      });
+
+      // 从后往前替换，保证下标不失效
+      let text = raw;
+      accepted.slice().sort((a, b) => b.start - a.start).forEach((job) => {
+        text = text.slice(0, job.start) + job.revised + text.slice(job.end);
+      });
+      appends.forEach((a) => { text = text.trimEnd() + '\n' + a.revised + '\n'; });
+
+      const appliedCount = accepted.length + appends.length;
+      if (appliedCount) {
+        this.currentContract.contractContent = text;
+        this.riskScore = null; // 修改后旧评分失效
+        accepted.forEach((job) => this.guideApplied.push(job.idx));
+        appends.forEach((a) => this.guideApplied.push(a.idx));
+      }
+
+      missed.sort((a, b) => a - b);
+      const missedText = missed.length
+        ? `，${missed.length} 条未定位到（第 ${missed.map((i) => i + 1).join('、')} 条），请在正文中手动处理`
+        : '';
+      if (appliedCount && !missed.length) {
+        ElMessage.success(`已应用 ${appliedCount} 条修改，建议重新做一次风险评估`);
+      } else if (appliedCount) {
+        ElMessage.warning(`已应用 ${appliedCount} 条修改${missedText}`);
+      } else {
+        ElMessage.warning(`没有可应用的修改${missedText || '，原文中未定位到相关内容'}`);
+      }
     },
 
     // guide 模式：完成本轮（有采纳才计轮次）
