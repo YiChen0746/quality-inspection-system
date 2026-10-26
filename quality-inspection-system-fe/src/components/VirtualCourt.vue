@@ -282,15 +282,17 @@ export default {
   watch: {
     events: {
       handler(list) {
+        if (!list || !list.length) return;
         // 新一轮庭审会先把事件数组清空，此时重置播放进度
         if (list.length < this.cursor) this.resetShow();
-        // 增量把新事件转成播放操作
+        // 增量把新事件转成播放操作（必须 deep，否则 push 不会触发）
         for (let i = this.cursor; i < list.length; i += 1) {
           this.enqueue(list[i]);
         }
         this.cursor = list.length;
       },
-      deep: false
+      deep: true,
+      immediate: true
     },
     streamDone(val) {
       if (val) this.ops.push({ kind: 'end' });
@@ -484,6 +486,8 @@ export default {
             if (item && item.id) map.set(item.id, item);
           });
           this.knowledge = Array.from(map.values());
+          // 第一轮检索结果到达时点亮“动态检索”阶段
+          if (op.round === 1) this.stageIndex = Math.max(this.stageIndex, 2);
           break;
         }
         case 'summary':
