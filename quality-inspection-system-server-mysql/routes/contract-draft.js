@@ -20,9 +20,10 @@ const FORM_STEPS = [
   { key: 'expiryDate',    label: '合同到期日期',   desc: '合同终止日期；无固定期限可留空',               required: false }
 ];
 
-// 复用的统一 LLM 调用工具（同步、带一次重试、失败返回 null）
+// 复用的统一 LLM 调用工具（同步、最多 3 次重试带退避、失败返回 null）
+// 超时 90s：全文修订要生成数千 token，免费模型（glm-4-flash）速度慢，30s 必超时
 async function callLLM(prompt, { maxTokens = 600, temperature = 0.7, systemPrompt = '' } = {}) {
-  for (let attempt = 0; attempt <= 1; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await axios.post(`${LLM_BASE}/chat/completions`, {
         model: LLM_MODEL,
@@ -38,15 +39,22 @@ async function callLLM(prompt, { maxTokens = 600, temperature = 0.7, systemPromp
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${LLM_KEY}`
         },
-        timeout: 30000,
-        httpsAgent: new https.Agent({ keepAlive: true, timeout: 30000 })
+        timeout: 90000,
+        httpsAgent: new https.Agent({ keepAlive: true, timeout: 90000 })
       });
       const c = resp.data?.choices?.[0]?.message?.content;
       if (c && String(c).trim()) return String(c).trim();
       return null;
     } catch (err) {
-      if (attempt === 0) { await new Promise(r => setTimeout(r, 1200)); continue; }
-      console.error('[contract-llm] call failed:', err.message);
+      const status = err?.response?.status;
+      console.error(`[contract-llm] call failed (attempt ${attempt + 1}):`, status || '', err.message);
+      // 429 限流 / 5xx 服务端错误 / 网络超时 → 等待后退避重试
+      if (attempt < 2 && (status === 429 || (status >= 500 && status < 600) || !status)) {
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      // 4xx 其他错误（欠费/未订购等）不重试，直接失败
+      return null;
     }
   }
   return null;
@@ -693,7 +701,7 @@ ${suggestionList}
 
       const raw = await callLLM(prompt, { maxTokens: 2500, temperature: 0.3, systemPrompt });
       if (!raw) {
-        return res.status(500).json({ err_code: 500, message: 'AI 修订服务暂时不可用，请稍后重试' });
+        return res.status(504).json({ err_code: 504, message: 'AI 服务繁忙或响应超时，请稍后重试（逐条分析约需 20-40 秒）' });
       }
       // 剥壳解析
       let cleaned = raw.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/m, '').trim();
@@ -759,7 +767,7 @@ ${suggestionList}
 
     const raw = await callLLM(prompt, { maxTokens: 4000, temperature: 0.3, systemPrompt });
     if (!raw) {
-      return res.status(500).json({ err_code: 500, message: 'AI 修订服务暂时不可用，请稍后重试' });
+      return res.status(504).json({ err_code: 504, message: 'AI 服务繁忙或响应超时，请稍后重试（全文修订约需 30-60 秒，请耐心等待）' });
     }
 
     const sepIdx = raw.indexOf('===CHANGES===');
