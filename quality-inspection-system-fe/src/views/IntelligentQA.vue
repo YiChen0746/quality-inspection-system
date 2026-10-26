@@ -40,6 +40,24 @@
           </div>
         </div>
       </div>
+
+      <!-- 技能中心：可互动按钮，点击即用 -->
+      <div class="skill-section">
+        <div class="session-title">🛠 技能中心</div>
+        <div class="skill-grid">
+          <button
+            v-for="skill in skills"
+            :key="skill.name"
+            class="skill-btn"
+            :disabled="data.isLoading"
+            @click="useSkill(skill)"
+          >
+            <span class="skill-icon">{{ skill.icon }}</span>
+            <span class="skill-name">{{ skill.name }}</span>
+            <span class="skill-desc">{{ skill.desc }}</span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 右侧聊天区 -->
@@ -98,8 +116,10 @@
 
 <script setup lang="ts">
 import { reactive, ref, nextTick, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus';
 import Message from '@/components/Message/index.vue';
+import { getAuthHeaders } from '@Setup/storage/user.js';
 import {
   getIntelligentQAResultStream,
   getChatSessions,
@@ -130,6 +150,126 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const sessions = ref<ChatSessionItem[]>([]);
 const currentSessionId = ref<number | null>(null);
 const currentSessionTitle = ref('');
+const router = useRouter();
+
+// ==================== 技能中心 ====================
+// action 类型：prompt=填入模板并定位光标待用户补充 | send=直接发送 | api=调接口取真实数据 | nav=跳转页面
+interface Skill {
+  icon: string;
+  name: string;
+  desc: string;
+  action: 'prompt' | 'send' | 'api' | 'nav';
+  text?: string;          // prompt/send 用的文本
+  cursorBefore?: number;  // prompt 模式：光标定位在距末尾 N 个字符处
+  api?: string;           // api 模式的接口地址
+  path?: string;          // nav 模式的路由
+}
+
+const skills: Skill[] = [
+  {
+    icon: '⚠️', name: '条款风险速查', desc: '粘贴条款秒评风险', action: 'prompt',
+    text: '【条款风险速查】请评估以下合同条款的法律风险，指出问题所在并给出具体修改建议：\n「」',
+    cursorBefore: 1
+  },
+  {
+    icon: '⚖️', name: '法条原文检索', desc: '按主题查法条原文', action: 'prompt',
+    text: '【法条检索】请检索并完整列出与“”相关的现行法律条文（注明《法律名称》第X条及条文原文）：',
+    cursorBefore: 24
+  },
+  {
+    icon: '🎓', name: '新手避坑指南', desc: '大学生签合同常见坑', action: 'send',
+    text: '我是第一次签合同的大学应届生。请分别告诉我签【租房合同】和【兼职/实习劳务合同】时最容易踩的 5 个坑，每个坑给出对应的法律依据（《法律名称》第X条）和一句可操作的防范建议。'
+  },
+  {
+    icon: '📊', name: '我的合同概览', desc: '合同总数与风险统计', action: 'api',
+    api: '/api/dashboard_stats'
+  },
+  {
+    icon: '⏰', name: '到期提醒', desc: '30 天内到期合同', action: 'api',
+    api: '/api/expiring_contracts?days=30'
+  },
+  {
+    icon: '📄', name: '去起草合同', desc: '专家智能体帮你写', action: 'nav',
+    path: '/contract-draft'
+  }
+];
+
+// 使用技能：可互动按钮的统一入口
+const useSkill = async (skill: Skill) => {
+  if (data.isLoading) return;
+
+  if (skill.action === 'nav' && skill.path) {
+    router.push(skill.path);
+    return;
+  }
+
+  if (skill.action === 'prompt' && skill.text) {
+    // 填入模板文本，光标定位到待填写处，用户补充后回车即发送
+    data.questionMessage = skill.text;
+    await adjustTextareaHeight();
+    await nextTick();
+    if (textareaRef.value) {
+      textareaRef.value.focus();
+      const pos = skill.text.length - (skill.cursorBefore ?? 0);
+      textareaRef.value.setSelectionRange(pos, pos);
+    }
+    ElMessage.success('已填入模板，补充内容后按 Enter 发送');
+    return;
+  }
+
+  if (skill.action === 'send' && skill.text) {
+    data.questionMessage = skill.text;
+    await onSubmit();
+    return;
+  }
+
+  if (skill.action === 'api' && skill.api) {
+    await runApiSkill(skill);
+    return;
+  }
+};
+
+// api 类技能：调真实业务接口，把数据格式化成聊天消息
+const runApiSkill = async (skill: Skill) => {
+  data.messageList.push({ type: EMessageType.User, content: `${skill.icon} ${skill.name}`, loading: false });
+  const botIdx = data.messageList.push({ type: EMessageType.Bot, content: '', loading: true }) - 1;
+  scrollToBottom();
+
+  try {
+    const resp = await fetch(skill.api!, { headers: { 'Content-Type': 'application/json', ...getAuthHeaders() } });
+    const json = await resp.json();
+    if (json.err_code !== 0) throw new Error(json.message || '查询失败');
+
+    let content = '';
+    if (skill.api!.includes('dashboard_stats')) {
+      const d = json.data;
+      content =
+        `📊 你的合同数据概览：\n\n` +
+        `• 合同总数：${d.totalContracts} 份\n` +
+        `• 本月新增：${d.monthNew} 份\n` +
+        `• 30 天内到期：${d.expiringCount} 份\n` +
+        `• 高风险合同：${d.highRiskCount} 份\n` +
+        `• 平均风险分：${d.avgRiskScore} 分\n\n` +
+        (d.highRiskCount > 0 ? `⚠️ 有 ${d.highRiskCount} 份高风险合同，建议尽快去「合同审查」做深度检查。` : `✅ 当前没有高风险合同，继续保持。`);
+    } else if (skill.api!.includes('expiring_contracts')) {
+      const list = json.data || [];
+      if (list.length === 0) {
+        content = `⏰ 未来 30 天内没有即将到期的合同，可以放心。`;
+      } else {
+        content = `⏰ 未来 30 天内有 ${list.length} 份合同即将到期：\n\n` +
+          list.map((c: any, i: number) =>
+            `${i + 1}. 《${c.fileName}》（${c.contractType || '未分类'}）\n   到期日：${c.expiryDate}，还剩 ${c.daysLeft} 天，风险等级：${c.riskLevel || '未评估'}`
+          ).join('\n\n') +
+          `\n\n建议提前与对方沟通续签或终止事宜，避免被动违约。`;
+      }
+    }
+
+    data.messageList[botIdx] = { type: EMessageType.Bot, content, loading: false };
+  } catch (e: any) {
+    data.messageList[botIdx] = { type: EMessageType.Bot, content: `查询失败：${e.message || '网络错误'}，请稍后再试。`, loading: false };
+  }
+  scrollToBottom();
+};
 
 // 自动调整textarea高度
 const adjustTextareaHeight = async () => {
@@ -371,6 +511,63 @@ onMounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* ============ 技能中心 ============ */
+.skill-section {
+  border-top: 1px solid #e5e7eb;
+  padding-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.skill-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.skill-btn:hover:not(:disabled) {
+  background: #ecfeff;
+  border-color: #0A9AAE;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(10, 154, 174, 0.15);
+}
+
+.skill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.skill-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.skill-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.skill-desc {
+  font-size: 10px;
+  color: #9ca3af;
+  line-height: 1.2;
 }
 
 .session-title {
