@@ -30,7 +30,7 @@
       <div class="form-section">
         <h3>填写合同信息</h3>
         <form @submit.prevent="generateContract" class="contract-form">
-          <div class="form-group">
+          <div class="form-group" :class="{ focused: activeField === 'contractName' }">
             <label for="contractName">合同名称 *</label>
             <input 
               type="text" 
@@ -38,12 +38,24 @@
               v-model="contractForm.contractName" 
               placeholder="请输入合同名称"
               :class="{ error: errors.contractName }"
+              @focus="onFieldFocus('contractName')"
+              @input="onFieldInput($event, 'contractName')"
+              @keydown="onSuggestionKeyDown($event)"
             >
+            <div v-if="showSuggestions && activeField === 'contractName' && suggestions.length" class="suggestion-popover">
+              <button
+                v-for="(s, i) in suggestions"
+                :key="i"
+                type="button"
+                class="suggestion-item"
+                @mousedown.prevent="applySuggestion(s)"
+              >{{ s }}</button>
+            </div>
             <span v-if="errors.contractName" class="error-message">{{ errors.contractName }}</span>
           </div>
 
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" :class="{ focused: activeField === 'partyA' }">
               <label for="partyA">甲方 *</label>
               <input 
                 type="text" 
@@ -51,11 +63,12 @@
                 v-model="contractForm.partyA" 
                 placeholder="请输入甲方名称"
                 :class="{ error: errors.partyA }"
+                @focus="onFieldFocus('partyA')"
               >
               <span v-if="errors.partyA" class="error-message">{{ errors.partyA }}</span>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" :class="{ focused: activeField === 'partyB' }">
               <label for="partyB">乙方 *</label>
               <input 
                 type="text" 
@@ -63,6 +76,7 @@
                 v-model="contractForm.partyB" 
                 placeholder="请输入乙方名称"
                 :class="{ error: errors.partyB }"
+                @focus="onFieldFocus('partyB')"
               >
               <span v-if="errors.partyB" class="error-message">{{ errors.partyB }}</span>
             </div>
@@ -75,16 +89,18 @@
               id="thirdParty" 
               v-model="contractForm.thirdParty" 
               placeholder="如有第三方请填写，无则留空"
+              @focus="onFieldFocus('thirdParty')"
             >
           </div>
 
           <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" :class="{ focused: activeField === 'subject' }">
               <label for="subject">合同主体 *</label>
               <select 
                 id="subject" 
                 v-model="contractForm.subject"
                 :class="{ error: errors.subject }"
+                @change="onFieldFocus('subject')"
               >
                 <option value="">请选择合同主体</option>
                 <option value="个人">个人</option>
@@ -94,9 +110,9 @@
               <span v-if="errors.subject" class="error-message">{{ errors.subject }}</span>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" :class="{ focused: activeField === 'contractType' }">
               <label for="contractType">合同类型</label>
-              <select id="contractType" v-model="contractForm.contractType">
+              <select id="contractType" v-model="contractForm.contractType" @change="onFieldFocus('contractType')">
                 <option value="">请选择合同类型</option>
                 <option value="买卖合同">买卖合同</option>
                 <option value="租赁合同">租赁合同</option>
@@ -108,7 +124,7 @@
             </div>
           </div>
 
-          <div class="form-group">
+          <div class="form-group" :class="{ focused: activeField === 'expiryDate' }">
             <label for="expiryDate">到期日期</label>
             <el-date-picker
               v-model="contractForm.expiryDate"
@@ -116,10 +132,11 @@
               placeholder="请选择合同到期日期"
               value-format="YYYY-MM-DD"
               style="width: 100%"
+              @change="onFieldFocus('expiryDate')"
             />
           </div>
 
-          <div class="form-group">
+          <div class="form-group description-group" :class="{ focused: activeField === 'description' }">
             <label for="description">合同描述 *</label>
             <textarea 
               id="description" 
@@ -127,7 +144,21 @@
               placeholder="请详细描述合同的主要内容、标的物、服务内容等"
               rows="4"
               :class="{ error: errors.description }"
+              @focus="onFieldFocus('description')"
+              @input="onFieldInput($event, 'description')"
+              @keydown="onSuggestionKeyDown($event)"
             ></textarea>
+            <!-- 描述补全建议条 -->
+            <div v-if="showSuggestions && activeField === 'description' && suggestions.length" class="suggestion-inline">
+              <span class="suggestion-inline-label">AI 续写建议：</span>
+              <button
+                v-for="(s, i) in suggestions"
+                :key="i"
+                type="button"
+                class="suggestion-inline-btn"
+                @mousedown.prevent="applySuggestion(s)"
+              >{{ s }}（回车插入）</button>
+            </div>
             <span v-if="errors.description" class="error-message">{{ errors.description }}</span>
           </div>
 
@@ -139,6 +170,69 @@
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- 中间右侧：起草指引面板 -->
+      <div class="guidance-section">
+        <div class="guidance-header">
+          <span class="guidance-icon">🎯</span>
+          <h3>起草指引</h3>
+        </div>
+
+        <!-- 环节进度条 -->
+        <div class="guidance-progress">
+          <div
+            v-for="step in guidance.data.formProgress || []"
+            :key="step.key"
+            class="progress-node"
+            :class="{ filled: step.filled, active: step.key === guidance.currentKey }"
+          >
+            <span class="progress-dot"></span>
+            <span class="progress-label">{{ step.label }}</span>
+          </div>
+        </div>
+
+        <!-- 当前环节 -->
+        <div v-if="guidance.data.currentStep" class="guidance-card current">
+          <div class="card-title">
+            当前在填 · 第 {{ guidance.data.currentStep.index }} / {{ guidance.data.currentStep.total }} 步
+          </div>
+          <div class="card-sub">{{ guidance.data.currentStep.label }}</div>
+          <div class="card-hint">
+            <span v-if="guidance.loadingHint" class="loading-dot">●●● 思考中</span>
+            <span v-else>{{ guidance.data.hint || guidance.data.currentStep.desc }}</span>
+          </div>
+        </div>
+
+        <!-- 下一环节 -->
+        <div v-if="guidance.data.nextStep && guidance.data.currentStep" class="guidance-card next">
+          <div class="card-title">下一步该写什么</div>
+          <div class="card-sub next-step-sub">{{ guidance.data.nextStep.label }}</div>
+          <div class="card-hint">{{ guidance.data.nextStep.desc }}</div>
+        </div>
+
+        <!-- 法条依据 -->
+        <div v-if="guidance.data.legalBasis && guidance.data.legalBasis.length" class="guidance-card law">
+          <div class="card-title">📚 相关法条依据</div>
+          <div class="law-list">
+            <div v-for="(law, i) in guidance.data.legalBasis" :key="i" class="law-item">
+              <div class="law-head">
+                <span class="law-name">《{{ law.law }}》</span>
+                <span v-if="law.article" class="law-article">{{ law.article }}</span>
+              </div>
+              <div class="law-content" :title="law.content">{{ law.content }}</div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="guidance-card law empty">
+          <div class="card-title">📚 法条依据</div>
+          <div class="card-hint muted">填写更多内容后，这里会自动显示相关法律条文</div>
+        </div>
+
+        <!-- 提示 -->
+        <div class="guidance-tip">
+          💡 点击任一输入框可查看针对该字段的专属指引
+        </div>
       </div>
 
       <!-- 右侧：合同预览和历史记录 -->
@@ -320,7 +414,26 @@ export default {
       exportFormat: 'docx',
       isExporting: false,
       riskScore: null,
-      isScoring: false
+      isScoring: false,
+
+      // ============ 起草指引 & 自动补全 ============
+      activeField: '',
+      showSuggestions: false,
+      suggestions: [],
+      guidance: {
+        currentKey: '',
+        loadingHint: false,
+        data: {
+          currentStep: null,
+          nextStep: null,
+          hint: '',
+          legalBasis: [],
+          formProgress: []
+        }
+      },
+      // debounce timers
+      _guidanceTimer: null,
+      _autocompleteTimer: null
     };
   },
   computed: {
@@ -334,6 +447,8 @@ export default {
   mounted() {
     this.loadTemplates();
     this.loadHistoryFromStorage();
+    // 首次加载默认指引
+    this.$nextTick(() => this.fetchGuidance('contractName'));
   },
   methods: {
     // 加载合同模板
@@ -551,6 +666,108 @@ export default {
       this.activeTab = 'preview';
     },
 
+    // ==================== 起草指引 & 补全相关方法 ====================
+
+    onFieldFocus(fieldKey) {
+      this.activeField = fieldKey;
+      this.showSuggestions = false;
+      this.fetchGuidance(fieldKey);
+    },
+
+    onFieldInput(evt, fieldKey) {
+      // 指引：表单改变也刷新（debounce 300ms）
+      this.fetchGuidance(fieldKey, true);
+      // 补全：description 和 contractName 触发
+      if ((fieldKey === 'description' || fieldKey === 'contractName') && evt?.target) {
+        const partial = evt.target.value || '';
+        clearTimeout(this._autocompleteTimer);
+        this._autocompleteTimer = setTimeout(() => this.fetchAutocomplete(fieldKey, partial), 500);
+      }
+    },
+
+    onSuggestionKeyDown(e) {
+      if (e.key === 'Enter' && this.showSuggestions && this.suggestions.length) {
+        // 不是 submit 场景：光标在字段上且补全有数据
+        if (this.activeField === 'description' || this.activeField === 'contractName') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.applySuggestion(this.suggestions[0]);
+        }
+      } else if (e.key === 'Escape') {
+        this.showSuggestions = false;
+      }
+    },
+
+    applySuggestion(suggestion) {
+      if (this.activeField === 'contractName') {
+        this.contractForm.contractName = suggestion;
+      } else if (this.activeField === 'description') {
+        // 追加到当前描述末尾（如果已有内容且不以标点结尾，加个逗号）
+        const cur = (this.contractForm.description || '').trimEnd();
+        if (!cur) {
+          this.contractForm.description = suggestion;
+        } else if (/[。！？；,，、：:]$/.test(cur)) {
+          this.contractForm.description = cur + suggestion;
+        } else {
+          this.contractForm.description = cur + '，' + suggestion;
+        }
+      }
+      this.showSuggestions = false;
+      this.suggestions = [];
+      // 补全后也刷新指引
+      this.fetchGuidance(this.activeField);
+    },
+
+    async fetchGuidance(fieldKey, debounced = false) {
+      clearTimeout(this._guidanceTimer);
+      const doFetch = () => {
+        this.guidance.currentKey = fieldKey;
+        this.guidance.loadingHint = true;
+        fetch('/api/contract_guidance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ currentField: fieldKey, contractForm: this.contractForm })
+        }).then(r => r.json())
+          .then(data => {
+            if (data.err_code === 0) {
+              this.guidance.data = data.data;
+            }
+          })
+          .catch(err => console.warn('[guidance] fetch failed:', err.message))
+          .finally(() => { this.guidance.loadingHint = false; });
+      };
+      if (debounced) {
+        this._guidanceTimer = setTimeout(doFetch, 350);
+      } else {
+        doFetch();
+      }
+    },
+
+    async fetchAutocomplete(fieldKey, partial) {
+      if (!partial || partial.trim().length < 2) {
+        this.suggestions = [];
+        this.showSuggestions = false;
+        return;
+      }
+      try {
+        const r = await fetch('/api/contract_autocomplete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ field: fieldKey, partialText: partial, contractForm: this.contractForm })
+        });
+        const data = await r.json();
+        if (data.err_code === 0 && data.data?.suggestions?.length) {
+          this.suggestions = data.data.suggestions.slice(0, 3);
+          this.showSuggestions = true;
+        } else {
+          this.suggestions = [];
+          this.showSuggestions = false;
+        }
+      } catch (err) {
+        console.warn('[autocomplete] failed:', err.message);
+      }
+    },
+
     // 重置表单
     resetForm() {
       this.contractForm = {
@@ -675,19 +892,22 @@ export default {
 
 .main-content {
   display: flex;
-  gap: 20px;
-  max-width: 1400px;
+  gap: 16px;
+  max-width: 1520px;
   margin: 0 auto;
 }
 
 /* 模板选择区域 */
 .template-section {
-  width: 280px;
+  width: 220px;
+  flex-shrink: 0;
   background: white;
   border-radius: 8px;
-  padding: 20px;
+  padding: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   height: fit-content;
+  position: sticky;
+  top: 20px;
 }
 
 .template-section h3 {
@@ -743,7 +963,8 @@ export default {
 
 /* 表单区域 */
 .form-section {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 460px;
   background: white;
   border-radius: 8px;
   padding: 25px;
@@ -852,7 +1073,8 @@ export default {
 
 /* 预览区域 */
 .preview-section {
-  width: 400px;
+  width: 340px;
+  flex-shrink: 0;
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -1060,6 +1282,7 @@ export default {
   }
   
   .template-section,
+  .guidance-section,
   .preview-section {
     width: 100%;
   }
@@ -1067,5 +1290,177 @@ export default {
   .form-row {
     flex-direction: column;
   }
+}
+
+/* ============ 起草指引面板 ============ */
+.guidance-section {
+  width: 280px;
+  flex-shrink: 0;
+  background: white;
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: fit-content;
+  position: sticky;
+  top: 20px;
+}
+.guidance-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.guidance-header h3 { margin: 0; font-size: 16px; color: #2c3e50; }
+.guidance-icon { font-size: 20px; }
+
+/* 环节进度条 */
+.guidance-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 4px;
+  background: #fafbfc;
+  border-radius: 6px;
+}
+.progress-node {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #bbb;
+}
+.progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  transition: all 0.3s;
+}
+.progress-node.filled { color: #67c23a; }
+.progress-node.filled .progress-dot { background: #67c23a; }
+.progress-node.active { color: #409eff; font-weight: 600; }
+.progress-node.active .progress-dot { background: #409eff; transform: scale(1.3); box-shadow: 0 0 0 3px rgba(64,158,255,0.2); }
+
+/* 指引卡片通用 */
+.guidance-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #ebf0f5;
+  background: #fafbfc;
+}
+.guidance-card.current { border-color: #409eff; background: #ecf5ff; }
+.guidance-card.next    { border-color: #67c23a; background: #f0f9eb; }
+.guidance-card.law     { border-color: #faecd8; background: #fdf6ec; }
+.guidance-card.law.empty { background: #fafbfc; }
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #909399;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.card-sub { font-size: 14px; font-weight: 600; color: #303133; margin-bottom: 4px; }
+.next-step-sub { color: #67c23a; }
+.card-hint { font-size: 13px; color: #606266; line-height: 1.6; }
+.card-hint.muted { color: #909399; font-size: 12px; font-style: italic; }
+.loading-dot { color: #409eff; font-size: 12px; }
+
+/* 法条列表 */
+.law-list { display: flex; flex-direction: column; gap: 8px; }
+.law-item {
+  padding: 8px 10px;
+  background: #ffffff;
+  border-left: 3px solid #e6a23c;
+  border-radius: 4px;
+}
+.law-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.law-name { font-weight: 600; color: #e6a23c; font-size: 13px; }
+.law-article { font-size: 11px; color: #909399; }
+.law-content { font-size: 12px; color: #606266; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.guidance-tip {
+  font-size: 12px;
+  color: #909399;
+  background: #f0f9eb;
+  padding: 8px 10px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+/* ============ 聚焦态 & 补全建议 ============ */
+.form-group.focused label { color: #409eff; }
+.form-group.focused input,
+.form-group.focused select,
+.form-group.focused textarea {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.15);
+}
+
+/* 合同名称字段的下拉补全气泡 */
+.suggestion-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  z-index: 100;
+  overflow: hidden;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+.suggestion-item {
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #606266;
+  transition: background 0.15s;
+}
+.suggestion-item:hover { background: #ecf5ff; color: #409eff; }
+
+/* 描述字段的底部补全建议条 */
+.description-group { position: relative; }
+.suggestion-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #f0f9eb;
+  border-radius: 6px;
+  border: 1px dashed #67c23a;
+}
+.suggestion-inline-label { font-size: 12px; color: #67c23a; font-weight: 600; }
+.suggestion-inline-btn {
+  border: none;
+  background: #ffffff;
+  color: #303133;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid #dcdfe6;
+  transition: all 0.15s;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suggestion-inline-btn:hover {
+  background: #67c23a;
+  color: white;
+  border-color: #67c23a;
 }
 </style>

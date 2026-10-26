@@ -110,6 +110,8 @@ router.post('/generate_contract', contractDraftAPI.generateContract);
 router.post('/export_contract_docx', contractDraftAPI.exportContractDocx);
 router.post('/export_contract_pdf', contractDraftAPI.exportContractPdf);
 router.get('/contract_templates', contractDraftAPI.getContractTemplates);
+router.post('/contract_guidance', contractDraftAPI.getGuidance);
+router.post('/contract_autocomplete', contractDraftAPI.getAutocomplete);
 
 // ================= 多智能体合同审查（核心角色—元角色 / 动态检索 / 全链条终审） ================
 router.use('/multi-agent', multiAgentAPI);

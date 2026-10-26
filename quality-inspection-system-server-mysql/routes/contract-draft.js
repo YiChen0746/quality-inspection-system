@@ -5,7 +5,225 @@ const axios = require('axios');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const{ Contract } = require('../models');
+const { Contract } = require('../models');
+const { loadKnowledgeSources, retrieveKnowledge, inferContractCategory } = require('../utils/knowledge-service');
+
+// ==================== 表单环节顺序（指引面板使用） ====================
+// 新手起草合同的标准填写顺序
+const FORM_STEPS = [
+  { key: 'contractName',   label: '合同名称',       desc: '一句话概括合同主题，例如"厂房租赁合同"',     required: true },
+  { key: 'contractType',   label: '合同类型',       desc: '选择合同类别，系统将据此推荐必备条款',        required: false },
+  { key: 'partyA',         label: '甲方（签约方一）', desc: '填写甲方完整名称或姓名',                     required: true },
+  { key: 'partyB',         label: '乙方（签约方二）', desc: '填写乙方完整名称或姓名',                     required: true },
+  { key: 'subject',        label: '合同主体类型',   desc: '选择个人 / 公司 / 其他组织',                  required: true },
+  { key: 'description',   label: '合同主要内容',   desc: '用一段话描述合同标的、权利义务、期限等核心事项', required: true },
+  { key: 'expiryDate',    label: '合同到期日期',   desc: '合同终止日期；无固定期限可留空',               required: false }
+];
+
+// 复用的统一 LLM 调用工具（同步、带一次重试、失败返回 null）
+async function callLLM(prompt, { maxTokens = 600, temperature = 0.7, systemPrompt = '' } = {}) {
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      const resp = await axios.post(`${LLM_BASE}/chat/completions`, {
+        model: LLM_MODEL,
+        messages: [
+          ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+          { role: 'user', content: prompt }
+        ],
+        stream: false,
+        max_tokens: maxTokens,
+        temperature
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${LLM_KEY}`
+        },
+        timeout: 30000,
+        httpsAgent: new https.Agent({ keepAlive: true, timeout: 30000 })
+      });
+      const c = resp.data?.choices?.[0]?.message?.content;
+      if (c && String(c).trim()) return String(c).trim();
+      return null;
+    } catch (err) {
+      if (attempt === 0) { await new Promise(r => setTimeout(r, 1200)); continue; }
+      console.error('[contract-llm] call failed:', err.message);
+    }
+  }
+  return null;
+}
+
+// ==================== 合同起草指引 ====================
+// POST /api/contract_guidance
+// body: { currentField, contractForm }
+// 返回：当前环节 / 下一环节 / 填写提示 / 法条依据（带书名号）
+let _kbCache = null; // 服务启动时加载一次，失败时 fallback
+async function loadKB() {
+  if (_kbCache) return _kbCache;
+  try {
+    _kbCache = await loadKnowledgeSources();
+  } catch (e) {
+    console.warn('[guidance] KB load failed, fallback to empty');
+    _kbCache = { historyCases: [], templates: [] };
+  }
+  return _kbCache;
+}
+
+const getGuidance = async (req, res) => {
+  try {
+    const { currentField, contractForm = {} } = req.body;
+
+    // 1. 推导当前环节索引
+    let currentIdx = FORM_STEPS.findIndex(s => s.key === currentField);
+    if (currentIdx === -1) currentIdx = FORM_STEPS.findIndex(s => !contractForm[s.key]);
+    if (currentIdx === -1) currentIdx = 0;
+
+    // 2. 推导下一环节（跳到第一个未填且 required 的）
+    let nextIdx = -1;
+    for (let i = 0; i < FORM_STEPS.length; i++) {
+      if (!contractForm[FORM_STEPS[i].key] || String(contractForm[FORM_STEPS[i].key]).trim().length < 2) {
+        nextIdx = i; break;
+      }
+    }
+    if (nextIdx === -1) nextIdx = Math.min(currentIdx + 1, FORM_STEPS.length - 1);
+
+    const currentStep = FORM_STEPS[currentIdx];
+    const nextStep    = FORM_STEPS[nextIdx];
+
+    // 3. 填写作答提示（LLM 生成，100 字以内中文）
+    let hint = currentStep.desc; // fallback 用硬编码 desc
+    const formSummary = Object.entries(contractForm)
+      .filter(([k, v]) => v && String(v).trim())
+      .map(([k, v]) => `${FORM_STEPS.find(s => s.key === k)?.label || k}：${String(v).slice(0, 40)}`)
+      .join('；');
+    const llmHint = await callLLM(
+      `用户正在填写合同起草表单，已填内容：${formSummary || '（尚未填写）'}。\n当前要填写的环节：「${currentStep.label}」。\n请用 80 字以内的中文告诉用户：这一项该怎么填、有哪些关键注意点。直接输出提示语，不要 markdown，不要列点。`,
+      { maxTokens: 200, temperature: 0.6,
+        systemPrompt: '你是一名耐心的合同辅导员，专门帮助第一次签合同的大学生和新手。语气友好、通俗、不说术语。' }
+    );
+    if (llmHint) hint = llmHint;
+
+    // 4. 法条依据（knowledge-service 检索 + LLM 筛选）
+    const kb = await loadKB();
+    const contractType = contractForm.contractType || inferContractCategory(contractForm.contractName || '');
+    const query = `${currentStep.label} ${contractType || '合同'} 法律规定 条款 要求`;
+    const items = retrieveKnowledge(query, kb, 4, contractType);
+
+    // 若检索结果少，尝试扩大查询
+    let laws = items.filter(i => i.type === 'law').slice(0, 3);
+    if (laws.length < 1) {
+      const items2 = retrieveKnowledge(`${currentStep.label} 合同条款`, kb, 3);
+      laws = items2.filter(i => i.type === 'law').slice(0, 3);
+    }
+
+    const legalBasis = laws.map(l => ({
+      law: l.title,
+      article: (l.title.match(/第[一二三四五六七八九十百千万\d]+条/) || [''])[0],
+      content: l.content,
+      source: l.source || ''
+    }));
+
+    // 5. 给用户的通俗法条摘要（LLM 生成，带书名号）
+    let basisSummary = '';
+    if (legalBasis.length) {
+      basisSummary = legalBasis.map(b => {
+        const lawTitle = b.law.replace(/\s+/g, '');
+        const shortContent = String(b.content).slice(0, 80);
+        return `《${lawTitle}》${b.article || ''}：${shortContent}${b.content.length > 80 ? '...' : ''}`;
+      }).join('\n');
+    }
+
+    return res.status(200).json({
+      err_code: 0,
+      data: {
+        currentStep: { ...currentStep, index: currentIdx + 1, total: FORM_STEPS.length },
+        nextStep:    { ...nextStep,    index: nextIdx + 1 },
+        hint,
+        legalBasis,
+        basisSummary,
+        formProgress: FORM_STEPS.map(s => ({
+          key: s.key,
+          label: s.label,
+          filled: !!(contractForm[s.key] && String(contractForm[s.key]).trim())
+        })),
+        contractType
+      }
+    });
+  } catch (error) {
+    console.error('[guidance] error:', error);
+    return res.status(500).json({ err_code: 500, message: '指引服务暂不可用' });
+  }
+};
+
+// ==================== 合同描述自动补全 ====================
+// POST /api/contract_autocomplete
+// body: { field, partialText, contractForm }
+// field: 当前光标所在字段（如 "description"）
+// partialText: 用户已输入的片段
+const getAutocomplete = async (req, res) => {
+  try {
+    const { field, partialText = '', contractForm = {} } = req.body;
+
+    if (!partialText || partialText.trim().length < 2) {
+      return res.status(200).json({ err_code: 0, data: { suggestions: [] } });
+    }
+
+    let systemPrompt = '';
+    let prompt = '';
+
+    // 根据不同字段定制补全提示词
+    const contractType = contractForm.contractType || inferContractCategory(contractForm.contractName || '');
+    switch (field) {
+      case 'description':
+        systemPrompt = '你是一位合同起草助手，专门帮新手用户把一句话合同描述扩展成一段规范的合同核心内容。只输出补全的那一段，不要解释，不要 markdown。';
+        prompt = `合同名称：${contractForm.contractName || '（未填）'}\n合同类型：${contractType || '（未选）'}\n甲方：${contractForm.partyA || '（未填）'}\n乙方：${contractForm.partyB || '（未填）'}\n\n用户已输入：${partialText}\n请续写一段完整的合同主要内容（合同标的、双方基本权利义务、履行期限、核心对价），控制在 80 字以内，语气专业，不要换行。`;
+        break;
+      case 'contractName':
+        systemPrompt = '你是一位合同命名助手，给出规范、清晰的合同名称候选。只输出 JSON，格式 {"suggestions":["...","...","..."]}。';
+        prompt = `用户已输入合同名称片段：${partialText}\n请根据片段推测可能的完整合同名称，返回 3 条候选，每条 10 字以内，都是中文合同名称。`;
+        break;
+      case 'partyA':
+      case 'partyB':
+        systemPrompt = '你是一位填单助手。只输出 JSON {"suggestions":["..."]}。';
+        prompt = `用户在"${field === 'partyA' ? '甲方' : '乙方'}"字段输入了：${partialText}\n如果像是一个公司/机构名，给出补全建议（可查的标准名称或常用后缀）；如果像人名，返回空数组。只返回 JSON。`;
+        break;
+      default:
+        systemPrompt = '你是一位填单助手。只输出 JSON {"suggestions":["...","...","..."]}。';
+        prompt = `字段「${field}」已输入：${partialText}\n给出 3 条补全建议，每条不超过 30 字。只返回 JSON。`;
+    }
+
+    const raw = await callLLM(prompt, { maxTokens: 400, temperature: 0.5, systemPrompt });
+    let suggestions = [];
+
+    if (!raw) {
+      return res.status(200).json({ err_code: 0, data: { suggestions: [] } });
+    }
+
+    // 剥掉 ```json ... ``` 或 ``` ... ``` 代码块壳
+    let cleaned = raw.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/m, '').trim();
+
+    if (cleaned.startsWith('{')) {
+      // JSON 格式
+      try {
+        const obj = JSON.parse(cleaned);
+        if (Array.isArray(obj.suggestions)) suggestions = obj.suggestions;
+        else if (Array.isArray(obj.data))   suggestions = obj.data;
+        else if (Array.isArray(obj))        suggestions = obj;
+      } catch { /* fall through */ }
+    }
+    if (suggestions.length === 0) {
+      // 普通文本 → 若有换行/分号则拆多条，否则取整段
+      const lines = cleaned.split(/[\n;；]/).map(s => s.trim()).filter(Boolean);
+      if (lines.length > 1) suggestions = lines.slice(0, 3);
+      else suggestions = [cleaned.slice(0, 80)];
+    }
+    suggestions = suggestions.filter(s => s && String(s).trim()).slice(0, 3).map(s => String(s).replace(/^[-\d\.\)\s]+/, '').trim());
+
+    return res.status(200).json({ err_code: 0, data: { suggestions } });
+  } catch (error) {
+    console.error('[autocomplete] error:', error);
+    return res.status(500).json({ err_code: 500, data: { suggestions: [] } });
+  }
+};
 
 // 通用 OpenAI 兼容大模型配置（DeepSeek / 智谱GLM / 硅基流动 / 本地Ollama 均可接入）
 const LLM_BASE = process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
@@ -442,5 +660,7 @@ module.exports = {
   generateContract,
   exportContractDocx,
   exportContractPdf,
-  getContractTemplates
+  getContractTemplates,
+  getGuidance,
+  getAutocomplete
 };
