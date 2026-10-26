@@ -47,7 +47,7 @@
           <span class="session-title">🛠 技能中心</span>
           <div class="skill-header-actions">
             <button type="button" class="skill-mini-btn" title="创建自己的技能" @click="openSkillForm()">＋ 添加</button>
-            <button type="button" class="skill-mini-btn" title="导入他人分享的 .json 技能包" @click="triggerImportPack()">📥 导入</button>
+            <button type="button" class="skill-mini-btn" title="导入他人分享的技能包或分享码" @click="importDialogVisible = true">📥 导入</button>
           </div>
         </div>
         <input ref="importPackInput" type="file" accept=".json,application/json" style="display: none" @change="handleImportPack" />
@@ -70,7 +70,7 @@
             <div class="skill-actions">
               <span class="skill-tag" title="内置技能" v-if="idx < builtinSkills.length">内置</span>
               <span class="skill-tag mine" title="你创建的技能" v-else>自建</span>
-              <button type="button" class="skill-op" title="分享为 .json 技能包" @click.stop="exportSkill(skill)">📤</button>
+              <button type="button" class="skill-op" title="分享（分享码 / 文件）" @click.stop="openShareDialog(skill)">📤</button>
               <button
                 type="button"
                 class="skill-op"
@@ -145,6 +145,30 @@
           <el-button @click="skillFormVisible = false">取消</el-button>
           <el-button type="primary" @click="saveUserSkill">保存技能</el-button>
         </template>
+      </el-dialog>
+
+      <!-- 技能分享弹窗：分享码 + 文件两种方式 -->
+      <el-dialog v-model="skillShareVisible" title="📤 分享技能" width="480px" append-to-body>
+        <div class="share-box">
+          <div class="share-label">方式一：复制分享码，粘贴发给同学（微信/QQ 直接发文本）</div>
+          <textarea class="share-code" :value="skillShareCode" rows="4" readonly @focus="($event.target as HTMLTextAreaElement).select()"></textarea>
+          <el-button type="primary" @click="copyShareCode">📋 复制分享码</el-button>
+          <el-divider>或</el-divider>
+          <div class="share-label">方式二：下载 .json 技能包文件</div>
+          <el-button v-if="skillSharing" @click="exportSkill(skillSharing)">💾 下载技能包文件</el-button>
+        </div>
+      </el-dialog>
+
+      <!-- 导入技能弹窗：文件 / 分享码 -->
+      <el-dialog v-model="importDialogVisible" title="📥 导入技能" width="480px" append-to-body>
+        <div class="share-box">
+          <div class="share-label">方式一：粘贴他人发来的分享码（LQA1: 开头）</div>
+          <textarea class="share-code" v-model="importPasteCode" rows="4" placeholder="把分享码完整粘贴到这里…"></textarea>
+          <el-button type="primary" :disabled="!importPasteCode.trim()" @click="importFromCode">安装技能</el-button>
+          <el-divider>或</el-divider>
+          <div class="share-label">方式二：选择 .json 技能包文件</div>
+          <el-button @click="triggerImportPack">📂 选择文件</el-button>
+        </div>
       </el-dialog>
     </div>
 
@@ -385,9 +409,85 @@ const exportSkill = (skill: Skill) => {
   URL.revokeObjectURL(a.href);
 };
 
-// 导入技能包文件
+// ============ 技能分享码（base64 文本码，微信/群里直接粘贴传播） ============
+// 格式：LQA1:<base64(utf-8(json))>，前缀便于识别与容错
+const encodeSkillPack = (skill: Skill): string => {
+  const pack = {
+    skillpack: 'legal-qa-skill',
+    version: 1,
+    icon: skill.icon, name: skill.name, desc: skill.desc,
+    action: skill.action, text: skill.text || '',
+    cursorBefore: skill.cursorBefore ?? 0
+  };
+  const json = JSON.stringify(pack);
+  const bytes = new TextEncoder().encode(json);
+  let bin = '';
+  bytes.forEach(b => { bin += String.fromCharCode(b); });
+  return 'LQA1:' + btoa(bin);
+};
+
+const decodeSkillPack = (code: string): Skill => {
+  const raw = String(code || '').trim().replace(/\s+/g, '');
+  if (!raw.startsWith('LQA1:')) throw new Error('分享码格式不对，应以 LQA1: 开头');
+  const bin = atob(raw.slice(5));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  const pack = JSON.parse(new TextDecoder().decode(bytes));
+  if (pack.skillpack !== 'legal-qa-skill' || !pack.name || !pack.text) throw new Error('分享码内容无效');
+  return {
+    icon: pack.icon || '✨',
+    name: String(pack.name),
+    desc: pack.desc || '来自分享码',
+    action: pack.action === 'send' ? 'send' : 'prompt',
+    text: String(pack.text),
+    cursorBefore: Number(pack.cursorBefore) || 0
+  };
+};
+
+// 分享弹窗：显示分享码 + 复制 + 下载文件
+const skillShareVisible = ref(false);
+const skillShareCode = ref('');
+const skillSharing = ref<Skill | null>(null);
+const openShareDialog = (skill: Skill) => {
+  try {
+    skillSharing.value = skill;
+    skillShareCode.value = encodeSkillPack(skill);
+    skillShareVisible.value = true;
+  } catch (e) {
+    ElMessage.error('生成分享码失败');
+  }
+};
+
+const copyShareCode = async () => {
+  try {
+    await navigator.clipboard.writeText(skillShareCode.value);
+    ElMessage.success('分享码已复制，粘贴发给同学即可');
+  } catch (e) {
+    // 剪贴板 API 不可用时降级为手动选择
+    const ta = document.createElement('textarea');
+    ta.value = skillShareCode.value;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    ElMessage.success('分享码已复制');
+  }
+};
+
+// 导入弹窗：文件 / 分享码 两种方式
+const importDialogVisible = ref(false);
+const importPasteCode = ref('');
 const importPackInput = ref<HTMLInputElement | null>(null);
 const triggerImportPack = () => importPackInput.value?.click();
+
+const installSkill = (skill: Skill) => {
+  if (allSkills.value.some(s => s.name === skill.name)) {
+    ElMessage.warning(`已存在同名技能「${skill.name}」，请先删除或重命名`);
+    return;
+  }
+  userSkills.value.push(skill);
+  saveUserSkills();
+  ElMessage.success(`技能「${skill.name}」已安装到技能中心`);
+};
 
 const handleImportPack = (event: Event) => {
   const input = event.target as HTMLInputElement;
@@ -402,11 +502,7 @@ const handleImportPack = (event: Event) => {
       if (pack.skillpack !== 'legal-qa-skill' || !pack.name || !pack.text) {
         throw new Error('不是有效的技能包文件');
       }
-      if (allSkills.value.some(s => s.name === pack.name)) {
-        ElMessage.warning(`已存在同名技能「${pack.name}」，导入前请先删除或重命名`);
-        return;
-      }
-      userSkills.value.push({
+      installSkill({
         icon: pack.icon || '✨',
         name: String(pack.name),
         desc: pack.desc || '来自技能包',
@@ -414,13 +510,22 @@ const handleImportPack = (event: Event) => {
         text: String(pack.text),
         cursorBefore: Number(pack.cursorBefore) || 0
       });
-      saveUserSkills();
-      ElMessage.success(`技能「${pack.name}」导入成功`);
     } catch (e: any) {
       ElMessage.error(e.message || '技能包解析失败，请检查文件内容');
     }
   };
   reader.readAsText(file);
+};
+
+const importFromCode = () => {
+  try {
+    const skill = decodeSkillPack(importPasteCode.value);
+    installSkill(skill);
+    importPasteCode.value = '';
+    importDialogVisible.value = false;
+  } catch (e: any) {
+    ElMessage.error(e.message || '分享码无效');
+  }
 };
 
 // 使用技能：可互动按钮的统一入口
@@ -934,6 +1039,28 @@ onMounted(() => {
 }
 .cursor-mark { color: #0A9AAE; font-weight: 700; animation: cursor-blink 1s steps(1) infinite; }
 @keyframes cursor-blink { 50% { opacity: 0; } }
+
+/* 分享 / 导入弹窗 */
+.share-box { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.share-label { font-size: 13px; color: #303133; font-weight: 600; }
+.share-code {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: Consolas, monospace;
+  color: #303133;
+  background: #f8fafc;
+  box-sizing: border-box;
+  resize: vertical;
+  word-break: break-all;
+  line-height: 1.5;
+}
+.share-code:focus { outline: none; border-color: #0A9AAE; }
+.share-box .el-button { align-self: flex-start; }
+.share-box .el-divider { width: 100%; margin: 6px 0; }
+.share-box .el-divider__text { font-size: 12px; color: #909399; }
 
 .session-title {
   padding: 12px 16px 8px;
