@@ -289,10 +289,14 @@
                   </template>
                 </el-progress>
                 <div class="score-level">
-                  <div class="level-label">风险等级</div>
+                  <div class="level-label">风险等级{{ reviseRound > 0 ? `（第 ${reviseRound + 1} 轮评估）` : '' }}</div>
                   <el-tag :type="riskScore.level === '高' ? 'danger' : (riskScore.level === '中' ? 'warning' : 'success')" size="large">
                     {{ riskScore.level }}风险
                   </el-tag>
+                  <button class="btn-revise-inline" :disabled="isRevising" @click="openReviseDialog">
+                    <span v-if="isRevising">AI 修改中...</span>
+                    <span v-else>🔄 AI 补充修改</span>
+                  </button>
                 </div>
               </div>
               <div v-if="riskScore.risks?.length" class="score-detail">
@@ -308,13 +312,9 @@
                 </ul>
               </div>
 
-              <!-- 二轮补充修改入口 -->
-              <div class="revise-entry">
-                <button class="btn-revise" :disabled="isRevising" @click="openReviseDialog">
-                  <span v-if="isRevising">AI 修改中...</span>
-                  <span v-else>🔄 二轮补充修改（AI 按建议修改）</span>
-                </button>
-                <div class="revise-tip">针对以上风险点和建议，让 AI 帮你补充修订合同</div>
+              <!-- 轮次进展提示 -->
+              <div v-if="reviseRound > 0" class="revise-round-tip">
+                ✅ 已完成 {{ reviseRound }} 轮 AI 修改。应用修改后可再次点击"风险评估"复评，未达低风险可继续下一轮修改，直至完善。
               </div>
             </div>
 
@@ -393,21 +393,28 @@
     </template>
   </el-dialog>
 
-  <!-- 二轮补充修改弹窗 -->
+  <!-- 补充修改弹窗（支持无限轮次） -->
   <el-dialog
     v-model="reviseDialogVisible"
-    title="二轮补充修改"
+    :title="`第 ${reviseRound + 1} 轮 AI 补充修改`"
     width="640px"
     :close-on-click-modal="false"
     @closed="resetReviseState"
   >
     <!-- 第一步：选择修改方式 -->
     <div v-if="reviseStep === 'choose'" class="revise-choose">
+      <div v-if="reviseHistory.length" class="revise-history">
+        <div class="history-title">📋 已完成轮次：</div>
+        <div v-for="(h, i) in reviseHistory" :key="i" class="history-item">
+          <div class="history-head">第 {{ h.round }} 轮（{{ h.mode === 'direct' ? '智能体直接修改' : 'AI 辅助逐条修改' }}）· {{ h.applied }} 处修改</div>
+          <div class="history-summary">{{ h.summary }}</div>
+        </div>
+      </div>
       <div class="revise-mode-card" @click="startRevise('direct')">
         <div class="mode-icon">🤖</div>
         <div class="mode-text">
           <div class="mode-title">智能体直接修改</div>
-          <div class="mode-desc">AI 根据风险建议自动修订全文，改完给你确认</div>
+          <div class="mode-desc">AI 根据最新风险建议自动修订全文，改完给你确认</div>
         </div>
         <div class="mode-arrow">→</div>
       </div>
@@ -419,6 +426,7 @@
         </div>
         <div class="mode-arrow">→</div>
       </div>
+      <div class="revise-loop-tip">💡 修改完成后重新"风险评估"，未达低风险可继续下一轮，直至满意为止</div>
     </div>
 
     <!-- direct：智能体改完，等用户确认 -->
@@ -473,7 +481,7 @@
       <template v-else-if="reviseStep === 'guide'">
         <el-button :disabled="isRevising" @click="reviseStep = 'choose'">返回</el-button>
         <el-button type="primary" :disabled="isRevising || !guideItems.length || guideApplied.length === guideItems.length" @click="applyAllGuideItems">全部采纳</el-button>
-        <el-button type="success" @click="reviseDialogVisible = false">完成</el-button>
+        <el-button type="success" @click="finishGuideRevise">完成</el-button>
       </template>
     </template>
   </el-dialog>
@@ -510,13 +518,15 @@ export default {
       riskScore: null,
       isScoring: false,
 
-      // ============ 二轮补充修改 ============
+      // ============ 补充修改（无限轮次） ============
       reviseDialogVisible: false,
       reviseStep: 'choose',     // choose | direct | guide
       isRevising: false,
       reviseResult: null,       // direct 模式结果 { revisedText, changeSummary }
       guideItems: [],           // guide 模式逐条修改项
       guideApplied: [],         // 已采纳的索引
+      reviseRound: 0,           // 已完成的修改轮次
+      reviseHistory: [],        // 每轮记录 { round, mode, applied, summary }
 
       // ============ 起草指引 & 自动补全 ============
       activeField: '',
@@ -685,8 +695,16 @@ export default {
       if (!this.reviseResult?.revisedText) return;
       this.currentContract.contractContent = this.reviseResult.revisedText;
       this.riskScore = null; // 修改后旧评分失效，提示重新评分
+      // 记录本轮
+      this.reviseRound += 1;
+      this.reviseHistory.push({
+        round: this.reviseRound,
+        mode: 'direct',
+        applied: (String(this.reviseResult.changeSummary || '').match(/^\d+[\.、]/gm) || []).length || 1,
+        summary: String(this.reviseResult.changeSummary || '已按建议完成修订').replace(/^\d+[\.、]\s*/gm, '；').trim()
+      });
       this.reviseDialogVisible = false;
-      ElMessage.success('修订版已应用，建议重新进行风险评估');
+      ElMessage.success(`第 ${this.reviseRound} 轮修订已应用，请重新进行风险评估`);
     },
 
     // guide 模式：逐条采纳
@@ -733,6 +751,22 @@ export default {
         }
       }
       ElMessage.success('全部修改已应用');
+    },
+
+    // guide 模式：完成本轮（有采纳才计轮次）
+    finishGuideRevise() {
+      if (this.guideApplied.length > 0) {
+        this.riskScore = null; // 修改后旧评分失效
+        this.reviseRound += 1;
+        this.reviseHistory.push({
+          round: this.reviseRound,
+          mode: 'guide',
+          applied: this.guideApplied.length,
+          summary: this.guideApplied.map(i => String(this.guideItems[i]?.explain || '')).filter(Boolean).slice(0, 5).join('；')
+        });
+        ElMessage.success(`第 ${this.reviseRound} 轮修订已应用，请重新进行风险评估`);
+      }
+      this.reviseDialogVisible = false;
     },
 
     // 表单验证
@@ -1676,28 +1710,65 @@ export default {
   color: white;
   border-color: #67c23a;
 }
-/* ============ 二轮补充修改 ============ */
-.revise-entry {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed #e4e7ed;
-  text-align: center;
-}
-.btn-revise {
-  width: 100%;
-  padding: 9px 14px;
+/* ============ 补充修改（无限轮次） ============ */
+/* 评分面板内联按钮：紧挨风险等级 */
+.btn-revise-inline {
+  margin-top: 8px;
+  padding: 7px 16px;
   background: linear-gradient(135deg, #409eff, #67c23a);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 16px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
-.btn-revise:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
-.btn-revise:disabled { opacity: 0.6; cursor: not-allowed; }
-.revise-tip { font-size: 11px; color: #909399; margin-top: 6px; }
+.btn-revise-inline:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(64, 158, 255, 0.35); }
+.btn-revise-inline:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* 轮次进展提示 */
+.revise-round-tip {
+  margin-top: 12px;
+  padding: 9px 12px;
+  background: #f0f9eb;
+  border: 1px dashed #67c23a;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #5a8a4a;
+  line-height: 1.6;
+}
+
+/* 弹窗：历史轮次记录 */
+.revise-history {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #fafbfc;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.history-title { font-size: 13px; font-weight: 600; color: #303133; margin-bottom: 8px; }
+.history-item {
+  padding: 8px 10px;
+  background: #f0f9eb;
+  border-left: 3px solid #67c23a;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.history-item:last-child { margin-bottom: 0; }
+.history-head { font-size: 12px; font-weight: 600; color: #529b2e; margin-bottom: 3px; }
+.history-summary { font-size: 11px; color: #606266; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* 无限轮次循环提示 */
+.revise-loop-tip {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #909399;
+}
 
 /* 弹窗：模式选择 */
 .revise-choose { display: flex; flex-direction: column; gap: 12px; padding: 8px 4px; }
