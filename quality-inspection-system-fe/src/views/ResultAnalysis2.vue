@@ -22,6 +22,63 @@
         </div>
       </div>
     </div>
+
+    <!-- 🧠 历史洞察 · 个性化经验总结 -->
+    <div class="insights-container" v-if="historyInsights">
+      <div class="insights-header">
+        <h3>🧠 历史洞察 · 个性化经验总结</h3>
+        <button class="insights-refresh" @click="loadHistoryInsights" :disabled="historyLoading">
+          {{ historyLoading ? '刷新中…' : '刷新洞察' }}
+        </button>
+      </div>
+
+      <div v-if="!historyInsights.hasHistory" class="insights-empty">
+        <p>📭 完成 2 份以上合同审查后，这里会自动总结你的常见遗漏点和风险模式</p>
+      </div>
+
+      <template v-else>
+        <div class="insights-meta">
+          <span>📊 已基于 <b>{{ historyInsights.totalRecords }}</b> 份合同的审查历史生成洞察</span>
+          <span class="risk-badges">
+            <span class="risk-badge low">低风险 {{ historyInsights.riskLevelDist?.low || 0 }}</span>
+            <span class="risk-badge mid">中风险 {{ historyInsights.riskLevelDist?.mid || 0 }}</span>
+            <span class="risk-badge high">高风险 {{ historyInsights.riskLevelDist?.high || 0 }}</span>
+          </span>
+        </div>
+
+        <div class="insights-grid">
+          <div class="insights-col">
+            <div class="insights-card">
+              <h4>⚠️ 常见遗漏项（{{ historyInsights.commonOmissions?.length || 0 }}）</h4>
+              <ul class="insights-list">
+                <li v-for="(item, i) in historyInsights.commonOmissions" :key="'o'+i">{{ item }}</li>
+                <li v-if="!historyInsights.commonOmissions?.length">暂无数据</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="insights-col">
+            <div class="insights-card">
+              <h4>🔍 常见不足项（{{ historyInsights.commonDeficiencies?.length || 0 }}）</h4>
+              <ul class="insights-list">
+                <li v-for="(item, i) in historyInsights.commonDeficiencies" :key="'d'+i">{{ item }}</li>
+                <li v-if="!historyInsights.commonDeficiencies?.length">暂无数据</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="insights-col">
+            <div class="insights-card reminders">
+              <h4>💡 个性化风险提醒</h4>
+              <ul class="insights-list">
+                <li v-for="(item, i) in historyInsights.reminders" :key="'r'+i">{{ item }}</li>
+                <li v-if="!historyInsights.reminders?.length">暂无数据</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -41,6 +98,8 @@ export default {
       ],
       reviewChart: null,
       draftChart: null,
+      historyInsights: null,
+      historyLoading: false,
       statisticsData: {
         summary: {
           totalReview: 0,
@@ -57,6 +116,7 @@ export default {
   async mounted() {
     await this.fetchStatisticsData();
     this.updateCardData();
+    await this.loadHistoryInsights();
     await this.$nextTick();
     this.renderReviewChart();
     this.renderDraftChart();
@@ -65,6 +125,7 @@ export default {
   async activated() {
     await this.fetchStatisticsData();
     this.updateCardData();
+    await this.loadHistoryInsights();
     await this.$nextTick();
     this.destroyCharts();
     this.renderReviewChart();
@@ -89,6 +150,36 @@ export default {
       const canvas = this.$refs[refName];
       return canvas && canvas.isConnected ? canvas : null;
     },
+    // 从API获取历史洞察（多智能体 HistorySage 总结）
+    async loadHistoryInsights() {
+      this.historyLoading = true;
+      try {
+        const resp = await fetch('/api/multi-agent/history-summary', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
+        });
+        const data = await resp.json();
+        if (data.err_code === 0 && data.data) {
+          this.historyInsights = data.data;
+        } else {
+          this.historyInsights = {
+            hasHistory: false, totalRecords: 0, message: data.message || '获取洞察失败',
+            commonOmissions: [], commonDeficiencies: [], reminders: [],
+            frequentRiskTypes: [], riskLevelDist: { low: 0, mid: 0, high: 0 }
+          };
+        }
+      } catch (error) {
+        console.warn('获取历史洞察失败:', error);
+        this.historyInsights = {
+          hasHistory: false, totalRecords: 0, message: '网络错误',
+          commonOmissions: [], commonDeficiencies: [], reminders: [],
+          frequentRiskTypes: [], riskLevelDist: { low: 0, mid: 0, high: 0 }
+        };
+      } finally {
+        this.historyLoading = false;
+      }
+    },
+
     // 从API获取统计数据
     async fetchStatisticsData() {
       try {
@@ -421,6 +512,104 @@ body {
   font-size: 1.5rem;
   color: #333;
   text-align: center;
+}
+
+/* ============ 历史洞察面板 ============ */
+.insights-container {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  margin: 20px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.insights-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  border-bottom: 2px solid #dff9f8;
+  padding-bottom: 12px;
+}
+.insights-header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #333;
+}
+.insights-refresh {
+  background: #dff9f8;
+  color: #006d6b;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+.insights-refresh:hover { background: #b8f0ed; }
+.insights-refresh:disabled { background: #e0e0e0; color: #888; cursor: not-allowed; }
+
+.insights-empty {
+  text-align: center;
+  padding: 30px;
+  color: #909399;
+  font-size: 14px;
+}
+
+.insights-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: #606266;
+}
+.insights-meta b { color: #006d6b; font-size: 15px; }
+
+.risk-badges { display: flex; gap: 8px; }
+.risk-badge {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  font-weight: 500;
+}
+.risk-badge.low { background: #f0f9eb; color: #67c23a; }
+.risk-badge.mid { background: #fdf6ec; color: #e6a23c; }
+.risk-badge.high { background: #fef0f0; color: #f56c6c; }
+
+.insights-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.insights-card {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #eef5f5;
+}
+.insights-card.reminders {
+  background: linear-gradient(135deg, #fff9e6 0%, #fff4d1 100%);
+  border-color: #ffe48a;
+}
+.insights-card h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #333;
+  font-weight: 600;
+}
+.insights-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #4b5565;
+}
+.insights-list li { margin-bottom: 4px; }
+
+@media (max-width: 900px) {
+  .insights-grid { grid-template-columns: 1fr; }
 }
 </style>
   

@@ -127,10 +127,6 @@ const logoutHandler = async () => {
                 <el-icon><Edit /></el-icon>
                 <span>合同起草</span>
               </el-menu-item>
-              <el-menu-item :disabled="!data.isLogin" index="/result_analysis" >
-                <el-icon><PieChart /></el-icon>
-                <span>合同分析</span>
-              </el-menu-item>
               <!-- <el-menu-item :disabled="!data.isLogin || data.isMaster" index="/quality_inspection" >
                 <el-icon><document/></el-icon>
                 <span>合同模板</span>
@@ -152,6 +148,10 @@ const logoutHandler = async () => {
                   <span class="menu-label-main">多智能体审查</span>
                   <span class="menu-sub">深度审查</span>
                 </span>
+              </el-menu-item>
+              <el-menu-item :disabled="!data.isLogin" index="/result_analysis" >
+                <el-icon><PieChart /></el-icon>
+                <span>合同分析</span>
               </el-menu-item>
 
               <!-- <el-menu-item   :disabled="!data.isLogin"      index="/editword" >

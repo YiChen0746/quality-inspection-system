@@ -439,7 +439,7 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         contract_summary: contractSummary,
         risk_clauses: riskClauses,
         core_clauses: coreClauses,
-        user_id: req.session?.user?.id || null
+        user_id: req.user?.id || null
       });
 
       // 步骤4: 分析完成

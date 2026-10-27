@@ -25,7 +25,8 @@ const META_ROLES = {
   partyALegal: { name: 'PartyALegal', label: '委托方·法律检索', group: 'partyA' },
   partyBLead: { name: 'PartyBLead', label: '相对方·首席抗辩', group: 'partyB' },
   partyBEvidence: { name: 'PartyBEvidence', label: '相对方·条款证据审查', group: 'partyB' },
-  partyBLegal: { name: 'PartyBLegal', label: '相对方·法律检索', group: 'partyB' }
+  partyBLegal: { name: 'PartyBLegal', label: '相对方·法律检索', group: 'partyB' },
+  historySage: { name: 'HistorySage', label: '历史洞察·经验总结', group: 'sage' }
 };
 
 // 每个元角色只关注自己的职责，避免“全能角色”造成的注意力分散（论文的核心动机）
@@ -88,7 +89,20 @@ const PROMPTS = {
     '5) 只输出JSON，不要markdown代码块。' +
     'JSON格式：{"score":75,"level":"中","summary":"总体结论","findings":[{"clause":"条款位置","risk":"风险说明","level":"高|中|低","basis":"法律依据","suggestion":"修改建议"}],' +
     '"factorConclusion":[{"factor":"合同要素","evidence":"条款或事实依据","basis":"法律依据","conclusion":"结论"}],' +
-    '"residualDisputes":[{"title":"残余争议","handling":"处理方式"}],"disclaimer":"免责说明"}'
+    '"residualDisputes":[{"title":"残余争议","handling":"处理方式"}],"historyWarnings":["用户历史高频风险提醒..."],"disclaimer":"免责说明"}'
+  ,historySage:
+    '你是【HistorySage｜历史洞察者】。你需要从用户过往的合同审查历史记录中，' +
+    '归纳总结出这个用户在合同起草和审查中的常见问题模式。' +
+    '请从提供的历史审查记录中识别：' +
+    '1) 这个用户最容易遗漏的合同要素或必备条款（commonOmissions，4-8条）；' +
+    '2) 这个用户合同中反复出现的结构性不足或模糊约定（commonDeficiencies，4-8条）；' +
+    '3) 针对当前用户合同习惯的个性化风险提醒和注意事项（reminders，3-6条，要具体可执行）；' +
+    '4) 历史高频风险类型的统计（frequentRiskTypes：[{"type":"风险类别","count":出现次数}]）；' +
+    '5) 历史合同整体风险等级分布（riskLevelDist：{low:n, mid:n, high:n}）；' +
+    '所有结论必须基于提供的历史记录内容，不得编造不存在的模式。' +
+    '只输出JSON，不要markdown代码块。' +
+    'JSON格式：{"commonOmissions":["..."],"commonDeficiencies":["..."],"reminders":["..."],"frequentRiskTypes":[],"riskLevelDist":{"low":0,"mid":0,"high":0}}'
+
 };
 
 // ==================== 基础工具 ====================
@@ -410,10 +424,20 @@ async function runSecondRound(ctx, contractName, content, residual, knowledge, p
 }
 
 // 阶段五：终审裁决（全链条复核 + 要素—结论映射）
-async function finalVerdict(ctx, contractName, content, focuses, allEntries, residual, knowledge) {
+async function finalVerdict(ctx, contractName, content, focuses, allEntries, residual, knowledge, historyInsights) {
   const transcript = allEntries
     .map((e) => `【第${e.round}轮｜${e.roleLabel}】${e.content}`)
     .join('\n');
+
+  const historyBlock = (historyInsights && historyInsights.hasHistory)
+    ? `【用户历史洞察】基于该用户过往 ${historyInsights.totalRecords} 份合同的审查历史，发现以下模式：
+- 常见遗漏项：${(historyInsights.commonOmissions || []).slice(0, 5).join('；')}
+- 常见不足项：${(historyInsights.commonDeficiencies || []).slice(0, 5).join('；')}
+- 风险提醒：${(historyInsights.reminders || []).slice(0, 4).join('；')}
+请在裁决中特别关注以上历史高频问题是否在当前合同中存在。
+
+`
+    : '';
 
   const userPrompt =
     `合同名称：${contractName || '未命名合同'}\n\n` +
@@ -422,6 +446,7 @@ async function finalVerdict(ctx, contractName, content, focuses, allEntries, res
     `残余争议：${residual.map((r) => r.title).join('；')}\n\n` +
     `两轮庭审记录：\n${clip(transcript, 6000)}\n\n` +
     `动态检索到的法律依据：\n${formatKnowledge(knowledge)}\n\n` +
+    historyBlock +
     '请完成全链条复核，输出最终审查结论。';
 
   const raw = await callRole(ctx, 'judgeVerdict', userPrompt, { maxTokens: 2400, temperature: 0.2, round: 3, focus: '终审裁决' });
@@ -594,7 +619,16 @@ async function handleReview(req, res, emit) {
       for (const r of sf.residual || []) allResidual.push(r);
     }
 
-    const verdict = await finalVerdict(ctx, name, content, focuses, allEntries, allResidual, knowledge);
+    // 获取用户历史洞察，供终审裁决参考
+    let historyInsights = null;
+    try {
+      historyInsights = await summarizeHistoryForUser(req.user?.id || null);
+    } catch (e) {
+      console.warn('获取历史洞察失败:', e.message);
+    }
+    if (emit && historyInsights) emit('history-insights', historyInsights);
+
+    const verdict = await finalVerdict(ctx, name, content, focuses, allEntries, allResidual, knowledge, historyInsights);
 
     // 持久化审查结论，作为后续审查的“历史案例”知识源
     if (contractId) {
@@ -638,6 +672,7 @@ async function handleReview(req, res, emit) {
       debate: allEntries,
       knowledge,
       verdict,
+      historyInsights,
       stats: {
         llmCalls: ctx.calls,
         failedCalls: ctx.failedCalls,
@@ -710,6 +745,96 @@ router.post('/review-stream', async (req, res) => {
   } finally {
     clearInterval(heartbeat);
     if (!closed) res.end();
+  }
+});
+
+// ==================== 历史洞察 ====================
+async function summarizeHistoryForUser(userId) {
+  try {
+    const results = await QualityResult.findAll({
+      where: userId ? { user_id: userId } : {},
+      order: [['created_at', 'DESC']],
+      limit: 50,
+      attributes: ['id', 'contract_name', 'contract_type', 'contract_summary', 'risk_clauses', 'core_clauses', 'created_at']
+    });
+
+    if (!results || results.length < 2) {
+      return {
+        hasHistory: false,
+        totalRecords: results ? results.length : 0,
+        message: '历史审查记录不足（至少 2 条），暂无法生成个性化洞察',
+        commonOmissions: [],
+        commonDeficiencies: [],
+        reminders: [],
+        frequentRiskTypes: [],
+        riskLevelDist: { low: 0, mid: 0, high: 0 }
+      };
+    }
+
+    const historyText = results
+      .map((r, i) => {
+        const summary = r.contract_summary ? '摘要: ' + String(r.contract_summary).slice(0, 300) : '';
+        const risks = r.risk_clauses ? '风险: ' + String(r.risk_clauses).slice(0, 500) : '';
+        return '--- 记录 #' + (i + 1) + ' | ' + (r.contract_name || '未命名') + ' | ' + (r.contract_type || '') + ' ---\n' + summary + '\n' + risks;
+      })
+      .join('\n\n');
+
+    const levelDist = { low: 0, mid: 0, high: 0 };
+    results.forEach((r) => {
+      if (r.risk_clauses) {
+        levelDist.high += (String(r.risk_clauses).match(/[高]/g) || []).length;
+        levelDist.mid += (String(r.risk_clauses).match(/[中]/g) || []).length;
+        levelDist.low += (String(r.risk_clauses).match(/[低]/g) || []).length;
+      }
+    });
+
+    const sageCtx = { calls: 0, failedCalls: 0 };
+    const sageResult = await callRole(sageCtx, 'historySage', '以下是用户过往 ' + results.length + ' 份合同的审查历史记录，请归纳总结用户合同起草中的常见问题模式：\n\n' + historyText.slice(0, 8000), { maxTokens: 1500, temperature: 0.3 });
+    const parsed = parseJson(sageResult) || {};
+
+    const frequentRiskTypes = parsed.frequentRiskTypes && Array.isArray(parsed.frequentRiskTypes)
+      ? parsed.frequentRiskTypes.filter((t) => t && t.type).slice(0, 6)
+      : [];
+
+    const dist = parsed.riskLevelDist || {};
+
+    return {
+      hasHistory: true,
+      totalRecords: results.length,
+      message: '基于您过往 ' + results.length + ' 份合同的审查历史，以下是 AI 为您总结的个性化洞察：',
+      commonOmissions: parsed.commonOmissions || [],
+      commonDeficiencies: parsed.commonDeficiencies || [],
+      reminders: parsed.reminders || [],
+      frequentRiskTypes,
+      riskLevelDist: {
+        low: Number(dist.low) || levelDist.low || 0,
+        mid: Number(dist.mid) || levelDist.mid || 0,
+        high: Number(dist.high) || levelDist.high || 0
+      }
+    };
+  } catch (error) {
+    console.warn('历史洞察生成失败（降级返回空）:', error.message);
+    return {
+      hasHistory: false,
+      totalRecords: 0,
+      message: '历史洞察生成失败：' + error.message,
+      commonOmissions: [],
+      commonDeficiencies: [],
+      reminders: [],
+      frequentRiskTypes: [],
+      riskLevelDist: { low: 0, mid: 0, high: 0 }
+    };
+  }
+}
+
+router.get('/history-summary', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    const summary = await summarizeHistoryForUser(userId);
+    return res.json({ err_code: 0, message: '获取成功', data: summary });
+  } catch (error) {
+    console.error('获取历史洞察失败:', error);
+    return res.status(500).json({ err_code: 500, message: '服务器错误' });
   }
 });
 
