@@ -105,12 +105,6 @@
 </template>
 
 <script>
-// 引入 TinyMCE 的 CDN
-const tinymceScript = document.createElement('script');
-tinymceScript.src = 'https://cdn.tiny.cloud/1/ds2dz33ze2crhi8f98m57skvr0zgg62m8ir8pyp5tewwpod5/tinymce/7/tinymce.min.js';
-tinymceScript.src ="https://cdnjs.cloudflare.com/ajax/libs/tinymce/5.10.2/tinymce.min.js"
-tinymceScript.referrerPolicy = 'origin';
-document.head.appendChild(tinymceScript);
 import axios from "axios";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
@@ -167,24 +161,6 @@ export default {
       });
     }
   },
-  externals: {
-    tinymce: 'tinymce'
-},
-loadTinyMCE() {
-    return new Promise((resolve, reject) => {
-        // 检查 tinymce 是否已经定义
-        if (typeof tinymce !== 'undefined') {
-            resolve(); // 已经加载
-        } else {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.tiny.cloud/1/ds2dz33ze2crhi8f98m57skvr0zgg62m8ir8pyp5tewwpod5/tinymce/7/tinymce.min.js';
-            script.onload = () => resolve(); // 加载完成
-            script.onerror = () => reject(new Error('Failed to load TinyMCE')); // 加载失败
-            document.head.appendChild(script);
-        }
-    });
-},
-
   methods: {
    
     loadTinyMCE() {

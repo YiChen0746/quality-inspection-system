@@ -275,9 +275,9 @@ onMounted(loadDashboardStats)
     <section class="hero">
       <div class="container1">
         <div class="hero-content">
-          <h1>智能<span class="highlight">合同质检系统</span>，规避法律风险</h1>
+          <h1>智能<span class="highlight">合同法务平台</span>，全程护航合同风险</h1>
           <p>
-            基于AI技术的专业合同审查平台，快速识别合同风险点，提升合同合规性，降低法律纠纷概率。
+            基于AI技术的一站式合同法务平台，覆盖合同起草、快速初筛、多智能体深度庭审审查与法务问答，快速识别合同风险点，降低法律纠纷概率。
           </p>
           <!-- 修改 btn-group 中的“立即体验”按钮 -->
           <div class="btn-group">
@@ -325,7 +325,7 @@ onMounted(loadDashboardStats)
       <div class="section-header">
         <h2 class="section-title">核心功能</h2>
         <p class="section-subtitle">
-          我们的智能合同质检系统，为您提供专业、高效的合同风险管理解决方案
+          我们的智能合同法务平台，为您提供起草、审查、问答一体化的专业合同风险管理解决方案
         </p>
       </div>
       <div class="features-grid1">
@@ -468,8 +468,8 @@ onMounted(loadDashboardStats)
   border-radius: 16px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
   text-align: center;
-  white-space: nowrap; /* 禁止自动换行 */
-  overflow-wrap: break-word; /* 溢出时强制换行 */
+  white-space: normal; /* 允许文案自动换行，避免超出台面被裁切 */
+  overflow-wrap: break-word;
 }
 
 .hero h1 {
@@ -482,12 +482,13 @@ onMounted(loadDashboardStats)
 
 .hero p {
   font-size: 1.2rem;
-  margin-bottom: 35px;
   color: var(--brand-text-grey);
-  max-width: 85%;
+  max-width: 90%;
+  margin: 0 auto 35px;
   text-align: center; /* 段落居中 */
-  white-space: inherit;
-  overflow-wrap: inherit;
+  line-height: 1.7;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .hero-image {
   position: static;

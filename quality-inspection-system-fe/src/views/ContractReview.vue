@@ -34,6 +34,7 @@
               ref="uploadRef"
               class="contract-uploader"
               drag
+              multiple
               :auto-upload="false"
               :before-upload="beforeUpload"
               :on-change="handleFileChange"
@@ -45,25 +46,34 @@
             >
               <div class="upload-content">
                 <div class="upload-icon">
-                  <el-icon v-if="!selectedFile" class="upload-icon-default"><UploadFilled /></el-icon>
+                  <el-icon v-if="!selectedFiles.length" class="upload-icon-default"><UploadFilled /></el-icon>
                   <el-icon v-else class="success-icon"><Check /></el-icon>
                 </div>
                 <div class="upload-text">
-                  <div class="primary-text" v-if="!selectedFile">
+                  <div class="primary-text" v-if="!selectedFiles.length">
                     拖拽文件到此处，或 <em>点击选择文件</em>
                   </div>
                   <div class="primary-text success-text" v-else>
-                    文件已选择：{{ selectedFile.name }}
+                    已选择 {{ selectedFiles.length }} 个文件，可继续添加
                   </div>
                   <div class="secondary-text">
-                    支持 JPG、PNG、PDF、DOC、DOCX 格式，最大 10MB
+                    支持 JPG、PNG、PDF、DOC、DOCX 格式，单文件最大 10MB；合同照片将自动 OCR 识别文字；支持一次批量导入多份合同
                   </div>
                 </div>
               </div>
             </el-upload>
+
+            <!-- 已选文件列表（批量导入） -->
+            <div class="file-chips" v-if="selectedFiles.length">
+              <div class="file-chip" v-for="(f, i) in selectedFiles" :key="i">
+                <el-icon><Document /></el-icon>
+                <span class="file-chip-name" :title="f.name">{{ f.name }}</span>
+                <el-icon class="file-chip-del" @click="removeFile(i)"><Close /></el-icon>
+              </div>
+            </div>
           </div>
 
-          <div class="options-area" v-if="selectedFile">
+          <div class="options-area" v-if="selectedFiles.length">
             <!-- 网络状态检测 -->
             <div class="network-status" v-if="showNetworkStatus">
               <div class="status-indicator" :class="networkStatus.type">
@@ -122,9 +132,12 @@
           <div class="progress-header">
             <h2 class="section-title">
               <el-icon class="rotating"><Loading /></el-icon>
-              正在分析合同
+              正在分析合同<template v-if="selectedFiles.length > 1">（第 {{ currentFileIndex + 1 }} / {{ selectedFiles.length }} 份）</template>
             </h2>
-            <p class="section-desc">AI正在深度解析您的合同内容，请稍候...</p>
+            <p class="section-desc">
+              <template v-if="selectedFiles.length > 1">正在处理：{{ selectedFiles[currentFileIndex]?.name }}　</template>
+              AI正在深度解析您的合同内容，请稍候...
+            </p>
           </div>
 
           <!-- 进度步骤 -->
@@ -248,6 +261,22 @@
                 <span class="btn-text">重新分析</span>
               </el-button>
             </div>
+          </div>
+
+          <!-- 批量结果切换：每份合同一份报告，按钮切换查看 -->
+          <div class="result-switcher" v-if="batchResults.length > 1">
+            <span class="result-switcher-label">批量结果（{{ batchResults.length }} 份）：</span>
+            <el-button
+              v-for="(r, i) in batchResults"
+              :key="i"
+              size="small"
+              :type="i === activeResultIndex ? 'primary' : 'default'"
+              :disabled="!r.data"
+              :title="r.data ? r.fileName : r.fileName + '（分析失败：' + (r.error || '未知错误') + '）'"
+              @click="switchResult(i)"
+            >
+              {{ r.fileName }}
+            </el-button>
           </div>
 
           <el-tabs v-model="activeTab" class="result-tabs" type="card">
@@ -472,14 +501,17 @@ import { getAuthHeaders } from '@Setup/storage/user.js';
 import { 
   Document, Upload, UploadFilled, Check, Loading, Clock,
   CircleCheck, Download, Refresh, ArrowDown, ArrowUp, User,
-  Warning, InfoFilled, Star, Search, View, Promotion
+  Warning, InfoFilled, Star, Search, View, Promotion, Close
 } from '@element-plus/icons-vue';
 
 const router = useRouter();
 
 // 响应式数据
 const uploadRef = ref();
-const selectedFile = ref<any>(null);
+const selectedFiles = ref<any[]>([]); // 批量导入：支持一次多份合同
+const currentFileIndex = ref(0);      // 批量处理时当前文件下标
+const batchResults = ref<any[]>([]);  // 每份合同一份审查结果：{ fileName, data, error }
+const activeResultIndex = ref(0);     // 结果区当前展示的合同下标
 const analysisPosition = ref('中立');
 const currentStage = ref<'upload' | 'processing' | 'result'>('upload');
 const currentStep = ref(0);
@@ -571,29 +603,51 @@ const beforeUpload = (file: File) => {
   return false; // 阻止默认上传
 };
 
-// 处理文件选择
+// 处理文件选择（批量导入：逐个校验后加入待审队列）
 const handleFileChange = (file: any) => {
-  if (file.raw) {
-    selectedFile.value = file.raw;
-    isDragover.value = false;
-    ElMessage.success('文件选择成功！请选择分析立场后开始分析');
-    
-    // 显示网络状态并自动检测连接
-    showNetworkStatus.value = true;
-    testConnection();
+  if (!file.raw) return;
+  const raw = file.raw as File;
+
+  const isValidType = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf',
+                      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+                      .includes(raw.type);
+  if (!isValidType) {
+    ElMessage.error(`「${raw.name}」格式不支持，仅支持 JPG、PNG、PDF、DOC、DOCX`);
+    return;
   }
+  if (raw.size / 1024 / 1024 >= 10) {
+    ElMessage.error(`「${raw.name}」超过 10MB 限制`);
+    return;
+  }
+  if (selectedFiles.value.some((f) => f.name === raw.name && f.size === raw.size)) {
+    ElMessage.warning(`「${raw.name}」已在列表中`);
+    return;
+  }
+
+  selectedFiles.value.push(raw);
+  isDragover.value = false;
+  ElMessage.success(`已添加「${raw.name}」，共 ${selectedFiles.value.length} 份待审合同`);
+
+  // 显示网络状态并自动检测连接
+  showNetworkStatus.value = true;
+  testConnection();
 };
 
-// 开始分析
+// 从待审队列移除文件
+const removeFile = (index: number) => {
+  selectedFiles.value.splice(index, 1);
+};
+
+// 开始分析（批量：逐份处理）
 const startAnalysis = async () => {
-  if (!selectedFile.value) {
+  if (!selectedFiles.value.length) {
     ElMessage.error('请先选择文件！');
     return;
   }
 
   isStarting.value = true;
-  ElMessage.info('正在启动分析流程...');
-  
+  ElMessage.info(`正在启动分析流程，共 ${selectedFiles.value.length} 份合同...`);
+
   // 延迟一下，让用户看到按钮的loading状态
   setTimeout(() => {
     currentStage.value = 'processing';
@@ -603,84 +657,123 @@ const startAnalysis = async () => {
   }, 800);
 };
 
-// 处理合同
+// 处理合同（批量循环，逐份走流式接口）
 const processContract = async () => {
-  try {
-    // 重置状态
+  // 重置状态
+  currentStep.value = 0;
+  currentProgress.value = 0;
+  processLogs.value = [];
+  batchResults.value = [];
+  activeResultIndex.value = 0;
+  reviewResult.value = null;
+
+  const total = selectedFiles.value.length;
+
+  for (let i = 0; i < total; i++) {
+    currentFileIndex.value = i;
+    const file = selectedFiles.value[i];
+    addProcessLog('upload', total > 1 ? `开始处理第 ${i + 1}/${total} 份：${file.name}` : '开始上传合同文件...');
     currentStep.value = 0;
     currentProgress.value = 0;
-    processLogs.value = [];
-    reviewResult.value = null;
 
-    addProcessLog('upload', '开始上传合同文件...');
-
-    // 创建FormData
-    const formData = new FormData();
-    formData.append('contract_file', selectedFile.value);
-    formData.append('analysis_position', analysisPosition.value);
-
-    // 发送请求并处理流式响应
-    const response = await fetch('/api/contract-review/review', {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error('网络请求失败');
+    try {
+      await processOneFile(file);
+    } catch (error: any) {
+      console.error(`「${file.name}」处理失败:`, error);
+      batchResults.value.push({ fileName: file.name, data: null, error: error?.message || '网络错误' });
+      addProcessLog('error', `「${file.name}」处理失败：${error?.message || '网络错误'}`);
     }
+  }
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('无法读取响应流');
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
- let doneReading = false;
-    while (!doneReading) {
-      const { done, value } = await reader.read();
-      
-      if (done) {
-        // 处理缓冲区中剩余的数据
-        if (buffer.trim()) {
-          try {
-            const data = JSON.parse(buffer);
-            handleProcessStep(data);
-          } catch (e) {
-            console.warn('解析最后数据失败:', e, '原始数据:', buffer);
-          }
-        }
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      
-      // 保留最后一行不完整的数据
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const data = JSON.parse(line);
-            handleProcessStep(data);
-          } catch (e) {
-            console.warn('解析响应数据失败:', e, '原始数据:', line);
-          }
-        }
-      }
-    }
-
-  } catch (error) {
-    console.error('处理失败:', error);
-    ElMessage.error('合同处理失败，请重试');
-    currentProcessing.value = false;
+  // 全部处理完成
+  currentProcessing.value = false;
+  const firstOk = batchResults.value.findIndex((r) => r.data);
+  if (firstOk >= 0) {
+    activeResultIndex.value = firstOk;
+    reviewResult.value = batchResults.value[firstOk].data;
+    const okCount = batchResults.value.filter((r) => r.data).length;
+    setTimeout(() => {
+      currentStage.value = 'result';
+      ElMessage.success(
+        total > 1
+          ? `批量审查完成：共 ${total} 份，成功 ${okCount} 份${okCount < total ? '，失败条目已置灰' : ''}`
+          : '合同审查完成！'
+      );
+    }, 600);
+  } else {
+    ElMessage.error('所有文件均审查失败，请重试');
     setTimeout(() => {
       currentStage.value = 'upload';
     }, 2000);
   }
+};
+
+// 单份合同的流式处理：返回 Promise，流结束时 resolve
+const processOneFile = (file: File) => {
+  return new Promise<any>(async (resolve, reject) => {
+    try {
+      const formData = new FormData();
+      formData.append('contract_file', file);
+      formData.append('analysis_position', analysisPosition.value);
+
+      const response = await fetch('/api/contract-review/review', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('网络请求失败');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('无法读取响应流');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let settled = false;
+      const settleOnce = (fn: () => void) => {
+        if (!settled) {
+          settled = true;
+          fn();
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) {
+            try {
+              handleProcessStep(JSON.parse(buffer), file.name, settleOnce, resolve, reject);
+            } catch (e) {
+              console.warn('解析最后数据失败:', e, '原始数据:', buffer);
+            }
+          }
+          // 流结束但未收到完成/错误事件（异常情况），兜底 settle
+          settleOnce(() => reject(new Error('服务响应异常中断')));
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              handleProcessStep(JSON.parse(line), file.name, settleOnce, resolve, reject);
+            } catch (e) {
+              console.warn('解析响应数据失败:', e, '原始数据:', line);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
 };
 //     let doneReading = false;
 //     while (!doneReading) {
@@ -718,73 +811,55 @@ const processContract = async () => {
 //   }
 // };
 
-// 处理各个步骤
-const handleProcessStep = (data: any) => {
+// 处理各个步骤（fileName 为当前文件名；settleOnce/resolve/reject 用于批量循环逐份推进）
+const handleProcessStep = (data: any, fileName: string, settleOnce: (fn: () => void) => void, resolve: (v?: any) => void, reject: (e?: any) => void) => {
   switch (data.step) {
     case 'upload_success':
       currentStep.value = 1;
       currentProgress.value = 25;
       addProcessLog('upload', data.message);
       break;
-    
+
     case 'ocr_processing':
       currentStep.value = 1;
       currentProgress.value = 40;
       addProcessLog('ocr', data.message);
       break;
-    
+
     case 'ocr_success':
       currentStep.value = 2;
       currentProgress.value = 60;
       addProcessLog('ocr', data.message);
       break;
-    
+
     case 'ai_analyzing':
       currentStep.value = 2;
       currentProgress.value = 80;
       addProcessLog('ai', data.message);
       break;
-    
+
     case 'analysis_complete':
       currentStep.value = 3;
       currentProgress.value = 100;
-      addProcessLog('complete', data.message);
-      currentProcessing.value = false;
-      
-      // 调试信息
-      console.log('=== 分析完成，接收到的数据 ===');
-      console.log('完整数据:', data);
-      console.log('data.data:', data.data);
-      console.log('data.data.result_id:', data.data?.result_id);
-      console.log('data.data.id:', data.data?.id);
-      console.log('=== 调试信息结束 ===');
-      
-      // 显示结果
-      setTimeout(() => {
-        reviewResult.value = data.data;
-        console.log('设置reviewResult.value:', reviewResult.value);
-        currentStage.value = 'result';
-        ElMessage.success('合同审查完成！');
-      }, 1000);
+      addProcessLog('complete', `「${fileName}」${data.message}`);
+      batchResults.value.push({ fileName, data: data.data, error: null });
+      settleOnce(() => resolve(data.data));
       break;
-    
+
     case 'ocr_error':
-      addProcessLog('error', data.message);
-      ElMessage.error(data.message);
-      currentProcessing.value = false;
-      // 回到上传阶段
-      setTimeout(() => {
-        currentStage.value = 'upload';
-      }, 2000);
+      addProcessLog('error', `「${fileName}」${data.message}`);
+      batchResults.value.push({ fileName, data: null, error: data.message });
+      settleOnce(() => resolve(null)); // 批量模式下继续处理下一份
       break;
-      
-    case 'ai_error':
-      addProcessLog('error', data.message);
-      
+
+    case 'ai_error': {
+      addProcessLog('error', `「${fileName}」${data.message}`);
+      batchResults.value.push({ fileName, data: null, error: data.message });
+
       // 根据错误类型显示不同的提示
       if (data.message.includes('超时') || data.message.includes('中断')) {
         ElMessage.error({
-          message: 'AI分析超时，可能是网络问题。建议：1. 检查网络连接 2. 稍后重试 3. 尝试上传较小的文件',
+          message: `「${fileName}」AI分析超时，可能是网络问题。建议：1. 检查网络连接 2. 稍后重试 3. 尝试上传较小的文件`,
           duration: 8000,
           showClose: true
         });
@@ -801,26 +876,29 @@ const handleProcessStep = (data: any) => {
           showClose: true
         });
       } else {
-        ElMessage.error(data.message);
+        ElMessage.error(`「${fileName}」${data.message}`);
       }
-      
-      currentProcessing.value = false;
-      // 回到上传阶段
-      setTimeout(() => {
-        currentStage.value = 'upload';
-      }, 2000);
+
+      settleOnce(() => resolve(null)); // 批量模式下继续处理下一份
       break;
-      
+    }
+
     case 'system_error':
-      addProcessLog('error', data.message);
-      ElMessage.error('系统错误，请稍后重试');
-      currentProcessing.value = false;
-      // 回到上传阶段
-      setTimeout(() => {
-        currentStage.value = 'upload';
-      }, 2000);
+      addProcessLog('error', `「${fileName}」${data.message}`);
+      batchResults.value.push({ fileName, data: null, error: data.message });
+      ElMessage.error(`「${fileName}」系统错误，请稍后重试`);
+      settleOnce(() => resolve(null)); // 批量模式下继续处理下一份
       break;
   }
+};
+
+// 切换批量结果中当前展示的合同报告
+const switchResult = (index: number) => {
+  const item = batchResults.value[index];
+  if (!item || !item.data) return;
+  activeResultIndex.value = index;
+  reviewResult.value = item.data;
+  activeTab.value = 'basic';
 };
 
 // 添加处理日志
@@ -927,7 +1005,10 @@ const exportReport = async () => {
 // 重新分析
 const resetAnalysis = () => {
   currentStage.value = 'upload';
-  selectedFile.value = null;
+  selectedFiles.value = [];
+  currentFileIndex.value = 0;
+  batchResults.value = [];
+  activeResultIndex.value = 0;
   reviewResult.value = null;
   currentStep.value = 0;
   currentProgress.value = 0;
@@ -945,7 +1026,7 @@ const goDeepReview = () => {
     return;
   }
   sessionStorage.setItem('deep-review-payload', JSON.stringify({
-    name: reviewResult.value?.contract_name || selectedFile.value?.name || '',
+    name: reviewResult.value?.contract_name || batchResults.value[activeResultIndex.value]?.fileName || '',
     content: String(content)
   }));
   router.push('/multi-agent');
@@ -993,7 +1074,7 @@ const testConnection = async () => {
 // 重试分析
 const isRetrying = ref(false);
 const retryAnalysis = async () => {
-  if (!selectedFile.value) {
+  if (!selectedFiles.value.length) {
     ElMessage.error('请先选择文件！');
     return;
   }
@@ -1503,6 +1584,45 @@ onMounted(() => {
 
 .upload-area {
   margin-bottom: 2rem;
+
+  // 批量导入：已选文件列表
+  .file-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+
+    .file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #f0f7ff;
+      border: 1px solid #c8e0fa;
+      color: #2f5e8f;
+      border-radius: 16px;
+      padding: 5px 10px 5px 12px;
+      font-size: 13px;
+      max-width: 320px;
+
+      .file-chip-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-chip-del {
+        cursor: pointer;
+        color: #9ab3cc;
+        border-radius: 50%;
+        padding: 1px;
+
+        &:hover {
+          color: #f56c6c;
+          background: #fde8e8;
+        }
+      }
+    }
+  }
   
   .contract-uploader {
     :deep(.el-upload) {
@@ -1802,6 +1922,33 @@ onMounted(() => {
         }
       }
     }
+  }
+}
+
+// 批量结果切换条
+.result-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: #f5f8fd;
+  border: 1px solid #e3ecf8;
+  border-radius: 10px;
+
+  .result-switcher-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #44546a;
+    margin-right: 4px;
+  }
+
+  .el-button {
+    margin-left: 0;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 

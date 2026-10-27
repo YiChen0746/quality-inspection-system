@@ -59,7 +59,7 @@ const upload = multer({
   }
 });
 
-// OCR处理函数
+// OCR处理函数（讯飞）
 async function processOCR(imagePath) {
   try {
     // 生成时间戳
@@ -133,6 +133,48 @@ async function processOCR(imagePath) {
     console.error('OCR处理错误:', error);
     throw new Error('OCR处理失败: ' + error.message);
   }
+}
+
+// 图片文字识别统一入口：优先讯飞 OCR（已配置密钥时），否则回退到视觉大模型（如智谱 glm-4v-flash）
+async function extractImageText(imagePath) {
+  if (OCR_CONFIG.APPId && OCR_CONFIG.APISecret && OCR_CONFIG.APIKey) {
+    return processOCR(imagePath);
+  }
+  return extractImageTextByVision(imagePath);
+}
+
+// 视觉大模型 OCR 回退：用与主模型同平台的视觉模型提取合同照片文字
+async function extractImageTextByVision(imagePath) {
+  const image = fs.readFileSync(imagePath, 'base64');
+  const ext = path.extname(imagePath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+  const visionModel = process.env.LLM_VISION_MODEL || 'glm-4v-flash';
+
+  const response = await axios.post(`${DEEPSEEK_CONFIG.baseURL}/chat/completions`, {
+    model: visionModel,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: `data:${mime};base64,${image}` } },
+        { type: 'text', text: '这是一份合同的照片或扫描件。请完整、逐字提取图片中的全部文字，保持原有段落顺序与结构，只输出识别到的文字本身，不要添加任何解释、评论或 Markdown 格式。' }
+      ]
+    }],
+    temperature: 0.1,
+    // glm-4v-flash 的 max_tokens 上限为 1024，超出会直接报 400
+    max_tokens: parseInt(process.env.LLM_VISION_MAX_TOKENS || '1024', 10)
+  }, {
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${DEEPSEEK_CONFIG.apiKey}`
+    },
+    timeout: 120000
+  });
+
+  const text = response.data?.choices?.[0]?.message?.content || '';
+  if (!text.trim()) {
+    throw new Error('视觉模型未返回文字内容（可在 .env 配置 OCR_APP_ID/OCR_API_SECRET/OCR_API_KEY 改用讯飞OCR）');
+  }
+  return text.trim();
 }
 
 // DeepSeek分析函数
@@ -315,7 +357,7 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
           message: '正在进行OCR文字识别...'
         }) + '\n');
         
-        contractContent = await processOCR(filePath);
+        contractContent = await extractImageText(filePath);
         
         // 打印OCR结果用于调试
         console.log('=== OCR识别结果 ===');
@@ -483,6 +525,55 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
       step: 'system_error',
       message: '系统错误: ' + error.message
     });
+  }
+});
+
+// 批量导入/图片识别：提取单个文件（docx/txt/jpg/png）的文字内容，不做分析、不入库
+// 独立的 multer 实例：额外放行 .txt 纯文本
+const uploadExtract = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = /jpeg|jpg|png|docx|txt/;
+    const extOk = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    if (extOk) {
+      return cb(null, true);
+    }
+    cb(new Error('文字提取暂支持 DOCX、TXT、JPG、PNG 格式'));
+  }
+});
+
+router.post('/extract-text', uploadExtract.single('file'), async (req, res) => {
+  const cleanup = () => { if (req.file) fs.unlink(req.file.path, () => {}); };
+  try {
+    if (!req.file) {
+      return res.status(400).json({ err_code: 400, message: '请上传文件' });
+    }
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let content = '';
+    if (['.jpg', '.jpeg', '.png'].includes(ext)) {
+      content = await extractImageText(req.file.path);
+    } else if (ext === '.docx') {
+      content = await extractDocxText(req.file.path);
+    } else if (ext === '.txt') {
+      content = fs.readFileSync(req.file.path, 'utf-8');
+    } else {
+      cleanup();
+      return res.status(400).json({ err_code: 400, message: '文字提取暂支持 DOCX、TXT、JPG、PNG 格式' });
+    }
+    cleanup();
+    if (!content || content.trim().length < 10) {
+      return res.status(422).json({ err_code: 422, message: '未能从文件中识别出有效文字，请检查文件内容' });
+    }
+    res.json({
+      err_code: 0,
+      message: 'ok',
+      data: { fileName: req.file.originalname, content: content.trim() }
+    });
+  } catch (error) {
+    console.error('文字提取失败:', error);
+    cleanup();
+    res.status(500).json({ err_code: 500, message: '文字提取失败: ' + error.message });
   }
 });
 

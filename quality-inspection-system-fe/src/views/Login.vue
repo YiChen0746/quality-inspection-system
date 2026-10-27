@@ -61,7 +61,7 @@
         </form>
       </div>
       
-      <div class="switch" id="switch-cnt" style="background-image: url(/public/img/login2.png);">
+      <div class="switch" id="switch-cnt" style="background-image: url(/img/login2.png);">
         <div class="switch__container" id="switch-c1" :class="{ 'is-hidden': isRegisterMode }" style="color: black;">
           <h2 class="switch__title title">系统介绍</h2>
           <p class="switch__description description">

@@ -193,7 +193,7 @@ const logoutHandler = async () => {
     text-align: center;
     line-height: 60px;
     /* background-image: url("./assets/images/header-bg.jpg"); */
-    background-image: url("header3.png");
+    background-image: url("@/assets/header3.png");
     background-size: 100% 700%;
   }
 
