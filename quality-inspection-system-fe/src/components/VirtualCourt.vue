@@ -43,17 +43,26 @@
         <div
           v-for="role in judgeRoles"
           :key="role.key"
-          class="seat seat-judge"
-          :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+          class="seat"
         >
-          <div class="avatar judge-avatar">
-            <span>{{ role.initial }}</span>
-            <i class="wave" v-if="speakerOf(role.key) === 'typing'"></i>
-            <i class="dots" v-else-if="thinking[role.key]"><b></b><b></b><b></b></i>
+          <div
+            class="actor actor-judge"
+            :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+            :style="{ animationDelay: (judgeRoles.indexOf(role) * 0.4) + 's' }"
+          >
+            <div class="actor-bubble" v-if="thinking[role.key]"><b></b><b></b><b></b></div>
+            <div class="actor-talk" v-else-if="speakerOf(role.key) === 'typing'"><i></i><i></i><i></i></div>
+            <div class="actor-head">
+              <i class="eye eye-l"></i>
+              <i class="eye eye-r"></i>
+              <i class="mouth"></i>
+            </div>
+            <div class="actor-body"><i class="collar"></i></div>
           </div>
           <div class="seat-label">{{ role.label }}</div>
         </div>
       </div>
+      <div class="bench-desk"></div>
     </div>
 
     <!-- 双方席位 -->
@@ -63,13 +72,21 @@
         <div
           v-for="role in partyARoles"
           :key="role.key"
-          class="seat seat-party"
-          :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+          class="seat"
         >
-          <div class="avatar party-avatar a-avatar">
-            <span>{{ role.initial }}</span>
-            <i class="wave" v-if="speakerOf(role.key) === 'typing'"></i>
-            <i class="dots" v-else-if="thinking[role.key]"><b></b><b></b><b></b></i>
+          <div
+            class="actor actor-a"
+            :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+            :style="{ animationDelay: (partyARoles.indexOf(role) * 0.4) + 's' }"
+          >
+            <div class="actor-bubble" v-if="thinking[role.key]"><b></b><b></b><b></b></div>
+            <div class="actor-talk" v-else-if="speakerOf(role.key) === 'typing'"><i></i><i></i><i></i></div>
+            <div class="actor-head">
+              <i class="eye eye-l"></i>
+              <i class="eye eye-r"></i>
+              <i class="mouth"></i>
+            </div>
+            <div class="actor-body"><i class="collar"></i></div>
           </div>
           <div class="seat-label">{{ role.label }}</div>
         </div>
@@ -77,6 +94,9 @@
 
       <!-- 中间：字幕与证据台 -->
       <div class="court-center">
+        <div class="duel-lane" :class="currentSideClass" v-if="current">
+          <span class="duel-pulse"></span>
+        </div>
         <div class="subtitle-box" :class="currentSideClass">
           <template v-if="current">
             <div class="subtitle-head">
@@ -123,13 +143,21 @@
         <div
           v-for="role in partyBRoles"
           :key="role.key"
-          class="seat seat-party"
-          :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+          class="seat"
         >
-          <div class="avatar party-avatar b-avatar">
-            <span>{{ role.initial }}</span>
-            <i class="wave" v-if="speakerOf(role.key) === 'typing'"></i>
-            <i class="dots" v-else-if="thinking[role.key]"><b></b><b></b><b></b></i>
+          <div
+            class="actor actor-b"
+            :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+            :style="{ animationDelay: (partyBRoles.indexOf(role) * 0.4) + 's' }"
+          >
+            <div class="actor-bubble" v-if="thinking[role.key]"><b></b><b></b><b></b></div>
+            <div class="actor-talk" v-else-if="speakerOf(role.key) === 'typing'"><i></i><i></i><i></i></div>
+            <div class="actor-head">
+              <i class="eye eye-l"></i>
+              <i class="eye eye-r"></i>
+              <i class="mouth"></i>
+            </div>
+            <div class="actor-body"><i class="collar"></i></div>
           </div>
           <div class="seat-label">{{ role.label }}</div>
         </div>
@@ -571,11 +599,13 @@ export default {
 </script>
 
 <style scoped>
+/* ===== 整体舞台：浅色柔和 ===== */
 .court-stage {
-  background: radial-gradient(120% 100% at 50% 0%, #1b2440 0%, #131a2e 45%, #0e1424 100%);
-  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfcff 0%, #f3f6fc 60%, #eef3fa 100%);
+  border: 1px solid #e4eaf6;
+  border-radius: 12px;
   padding: 16px 18px 18px;
-  color: #e8ecf7;
+  color: #33415c;
   position: relative;
   overflow: hidden;
 }
@@ -590,26 +620,27 @@ export default {
 }
 .case-title { display: flex; align-items: center; gap: 10px; }
 .case-badge {
-  background: linear-gradient(135deg, #7c5cff, #4a6cf7);
+  background: linear-gradient(135deg, #a495e8, #7f9df0);
+  color: #fff;
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
   letter-spacing: 1px;
 }
-.case-name { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+.case-name { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; color: #2f3b52; }
 .case-status { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
-.status-live { background: rgba(46, 158, 91, 0.18); color: #5fe0a0; }
-.status-done { background: rgba(124, 92, 255, 0.18); color: #b3a4ff; }
+.status-live { background: #e3f5ea; color: #3d9b6d; }
+.status-done { background: #eee9fb; color: #8578cf; }
 
 .court-controls { display: flex; align-items: center; gap: 8px; }
-.court-clock { font-family: Consolas, monospace; font-size: 13px; color: #9fb0d0; }
+.court-clock { font-family: Consolas, monospace; font-size: 13px; color: #8a97ad; }
 
 /* 焦点横幅 */
 .focus-banner {
   margin-top: 10px;
-  background: rgba(124, 92, 255, 0.1);
-  border: 1px solid rgba(124, 92, 255, 0.3);
-  border-radius: 6px;
+  background: #f4f1fd;
+  border: 1px solid #e0d6f8;
+  border-radius: 8px;
   padding: 8px 12px;
   display: flex;
   align-items: center;
@@ -617,12 +648,12 @@ export default {
   flex-wrap: wrap;
   animation: bannerIn 0.5s ease-out;
 }
-.focus-label { font-size: 12px; color: #b3a4ff; letter-spacing: 1px; }
-.focus-item { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.focus-label { font-size: 12px; color: #8578cf; letter-spacing: 1px; }
+.focus-item { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; color: #43507a; }
 .focus-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
-.sev-高 { background: #f56c6c; }
-.sev-中 { background: #e6a23c; }
-.sev-低 { background: #2e9e5b; }
+.sev-高 { background: #f08080; }
+.sev-中 { background: #ebb35c; }
+.sev-低 { background: #6fbf8f; }
 
 /* 阶段进度 */
 .stage-steps { display: flex; gap: 8px; margin-top: 12px; }
@@ -632,101 +663,221 @@ export default {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #7f8ca8;
+  border-radius: 8px;
+  background: #eef2f9;
+  color: #94a1b8;
   font-size: 12px;
   transition: all 0.3s;
 }
-.stage-step.active { background: rgba(74, 108, 247, 0.22); color: #cfd8ff; }
-.stage-step.done { background: rgba(46, 158, 91, 0.16); color: #86e6b4; }
+.stage-step.active { background: #e2ebfc; color: #3e63b8; box-shadow: inset 0 0 0 1px #c3d6f5; }
+.stage-step.done { background: #e4f4ea; color: #4a9e74; }
 .step-index {
   width: 16px; height: 16px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #d7dfec;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 11px;
 }
 
-/* 审判席 */
+/* ===== 审判席 ===== */
 .judge-bench {
   margin: 16px auto 0;
   max-width: 620px;
-  background: linear-gradient(180deg, rgba(124, 92, 255, 0.16), rgba(124, 92, 255, 0.04));
-  border: 1px solid rgba(124, 92, 255, 0.28);
-  border-radius: 10px;
-  padding: 10px 14px 12px;
+  background: linear-gradient(180deg, #f6f3fd, #f9f7fe);
+  border: 1px solid #e3dbf9;
+  border-radius: 12px;
+  padding: 10px 14px 14px;
   position: relative;
 }
 .bench-plate {
   text-align: center;
   font-size: 11px;
   letter-spacing: 6px;
-  color: #a892ff;
-  margin-bottom: 8px;
+  color: #9c8fd6;
+  margin-bottom: 6px;
 }
 .seat-row { display: flex; justify-content: center; gap: 44px; }
+.bench-desk {
+  height: 12px;
+  margin: 2px auto 0;
+  max-width: 460px;
+  background: linear-gradient(180deg, #ecdfc9, #dccbaa);
+  border-radius: 4px 4px 10px 10px;
+  box-shadow: 0 3px 6px rgba(160, 130, 90, 0.18);
+}
 
-/* 席位通用 */
+/* ===== 动画小人 ===== */
 .seat { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.seat-label { font-size: 11px; color: #9aa8c4; text-align: center; }
-.avatar {
-  width: 46px; height: 46px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 600;
+.seat-label { font-size: 11px; color: #6d7a94; text-align: center; transition: color 0.25s; }
+
+.actor {
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   position: relative;
-  transition: transform 0.25s, box-shadow 0.25s;
+  animation: actorBreath 3.2s ease-in-out infinite;
+  transform-origin: 50% 100%;
 }
-.judge-avatar {
-  background: linear-gradient(160deg, #6b57d6, #3f4bb5);
-  box-shadow: 0 0 0 2px rgba(163, 146, 255, 0.35);
+@keyframes actorBreath {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
 }
-.a-avatar {
-  background: linear-gradient(160deg, #2f6fed, #1f4aa6);
-  box-shadow: 0 0 0 2px rgba(107, 156, 255, 0.3);
-}
-.b-avatar {
-  background: linear-gradient(160deg, #e6862b, #a85f16);
-  box-shadow: 0 0 0 2px rgba(255, 184, 107, 0.3);
-}
-.seat.speaking .avatar { transform: scale(1.12); }
-.seat.speaking .judge-avatar { box-shadow: 0 0 18px 4px rgba(163, 146, 255, 0.65); }
-.seat.speaking .a-avatar { box-shadow: 0 0 18px 4px rgba(107, 156, 255, 0.65); }
-.seat.speaking .b-avatar { box-shadow: 0 0 18px 4px rgba(255, 184, 107, 0.65); }
 
-/* 发言声波 */
-.wave {
-  position: absolute;
-  inset: -6px;
+.actor-head {
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  animation: waveOut 1.4s ease-out infinite;
+  background: #ffd9b8;
+  border: 2px solid rgba(150, 110, 70, 0.12);
+  position: relative;
+  z-index: 2;
 }
-@keyframes waveOut {
-  0% { transform: scale(0.9); opacity: 0.7; }
-  100% { transform: scale(1.45); opacity: 0; }
-}
-
-/* 思考中的三点 */
-.dots {
+.eye {
   position: absolute;
-  bottom: -6px;
+  top: 11px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #4a3f35;
+}
+.eye-l { left: 7px; }
+.eye-r { right: 7px; }
+.mouth {
+  position: absolute;
+  bottom: 5px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(10, 16, 30, 0.9);
-  border-radius: 8px;
-  padding: 2px 6px;
+  width: 8px;
+  height: 3px;
+  border-radius: 1px 1px 6px 6px;
+  background: #c9704f;
+}
+
+.actor-body {
+  width: 40px;
+  height: 34px;
+  margin-top: -3px;
+  border-radius: 12px 12px 7px 7px;
+  position: relative;
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.25s;
+}
+.collar {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 7px solid rgba(255, 255, 255, 0.9);
+}
+.actor-judge .actor-body { background: linear-gradient(180deg, #a89ae8, #8679d2); }
+.actor-a .actor-body { background: linear-gradient(180deg, #82adf3, #5f92e6); }
+.actor-b .actor-body { background: linear-gradient(180deg, #f4ba82, #ec9f58); }
+
+/* 发言状态：身体摇摆 + 头部点头 + 嘴巴开合 + 光晕 */
+.actor.speaking { animation: actorTalk 0.5s ease-in-out infinite; }
+@keyframes actorTalk {
+  0%, 100% { transform: translateY(0) rotate(-2.5deg); }
+  50% { transform: translateY(-4px) rotate(2.5deg); }
+}
+.actor.speaking .actor-head { animation: headNod 0.5s ease-in-out infinite; }
+@keyframes headNod {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+.actor.speaking .mouth { animation: mouthTalk 0.24s linear infinite; }
+@keyframes mouthTalk {
+  0%, 100% { height: 3px; width: 8px; }
+  50% { height: 7px; width: 7px; }
+}
+.actor.speaking .actor-body { box-shadow: 0 6px 16px rgba(110, 130, 200, 0.3); }
+.actor.speaking ~ .seat-label,
+.seat:has(.actor.speaking) .seat-label { color: #33415c; font-weight: 600; }
+
+/* 思考状态：头部微侧 */
+.actor.thinking .actor-head { animation: headTilt 1.6s ease-in-out infinite; }
+@keyframes headTilt {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-9deg); }
+}
+
+/* 发言声浪气泡 */
+.actor-talk {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+  z-index: 3;
+  background: #fff;
+  border: 1px solid #e3e9f5;
+  border-radius: 9px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 15px;
+  box-shadow: 0 3px 8px rgba(100, 120, 160, 0.16);
+  animation: bubblePop 0.25s ease-out;
+}
+.actor-talk i {
+  width: 3px;
+  border-radius: 2px;
+  background: #7c9ff0;
+  animation: soundBar 0.5s ease-in-out infinite;
+}
+.actor-b .actor-talk i { background: #eda659; }
+.actor-judge .actor-talk i { background: #9a8ade; }
+.actor-talk i:nth-child(1) { height: 5px; }
+.actor-talk i:nth-child(2) { height: 10px; animation-delay: 0.12s; }
+.actor-talk i:nth-child(3) { height: 6px; animation-delay: 0.24s; }
+@keyframes soundBar {
+  0%, 100% { transform: scaleY(0.45); }
+  50% { transform: scaleY(1); }
+}
+
+/* 思考气泡 */
+.actor-bubble {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  z-index: 3;
+  background: #fff;
+  border: 1px solid #e3e9f5;
+  border-radius: 10px;
+  padding: 5px 7px;
   display: flex;
   gap: 3px;
+  box-shadow: 0 3px 8px rgba(100, 120, 160, 0.16);
+  animation: bubblePop 0.25s ease-out;
 }
-.dots b {
-  width: 4px; height: 4px; border-radius: 50%; background: #9fb0d0;
+.actor-talk::after,
+.actor-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 10px;
+  border: 4px solid transparent;
+  border-top-color: #fff;
+}
+.actor-bubble b {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #93a2ba;
   animation: blink 1.2s infinite;
 }
-.dots b:nth-child(2) { animation-delay: 0.2s; }
-.dots b:nth-child(3) { animation-delay: 0.4s; }
+.actor-bubble b:nth-child(2) { animation-delay: 0.2s; }
+.actor-bubble b:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+@keyframes bubblePop {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 
-/* 双方席位区 */
+/* ===== 双方席位区 ===== */
 .party-area {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr) 150px;
@@ -735,76 +886,116 @@ export default {
   align-items: start;
 }
 .party {
-  border-radius: 10px;
-  padding: 10px 8px;
+  border-radius: 12px;
+  padding: 10px 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   align-items: center;
 }
-.party-a { background: rgba(47, 111, 237, 0.09); border: 1px solid rgba(47, 111, 237, 0.25); }
-.party-b { background: rgba(230, 134, 43, 0.09); border: 1px solid rgba(230, 134, 43, 0.25); }
+.party-a { background: #eef4fe; border: 1px solid #d4e3fa; }
+.party-b { background: #fdf4e9; border: 1px solid #f6e2c6; }
 .party-plate {
-  font-size: 11px; letter-spacing: 2px; color: #9aa8c4;
-  writing-mode: horizontal-tb;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #7d8aa3;
 }
 
-/* 中间字幕 + 证据台 */
-.court-center { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* ===== 辩论光束：发言方的观点飞向对面 ===== */
+.duel-lane { position: relative; height: 12px; }
+.duel-pulse { position: absolute; top: 2px; width: 8px; height: 8px; border-radius: 50%; opacity: 0; }
+.duel-lane.side-a .duel-pulse {
+  background: #6b9bf0;
+  box-shadow: 0 0 8px 2px rgba(107, 155, 240, 0.55);
+  animation: flyRight 1.1s linear infinite;
+}
+.duel-lane.side-b .duel-pulse {
+  background: #eda659;
+  box-shadow: 0 0 8px 2px rgba(237, 166, 89, 0.55);
+  animation: flyLeft 1.1s linear infinite;
+}
+.duel-lane.side-judge .duel-pulse {
+  background: #9a8ade;
+  box-shadow: 0 0 8px 2px rgba(154, 138, 222, 0.55);
+  left: calc(50% - 4px);
+  animation: judgePulse 1s ease-in-out infinite;
+}
+@keyframes flyRight {
+  0% { left: 0; opacity: 0; transform: scale(0.6); }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: calc(100% - 8px); opacity: 0; transform: scale(1); }
+}
+@keyframes flyLeft {
+  0% { right: 0; opacity: 0; transform: scale(0.6); }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { right: calc(100% - 8px); opacity: 0; transform: scale(1); }
+}
+@keyframes judgePulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+
+/* ===== 中间字幕 + 证据台 ===== */
+.court-center { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .subtitle-box {
   min-height: 108px;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border-left: 3px solid #6b7ba8;
+  background: #fff;
+  border: 1px solid #e6ecf6;
+  border-left: 4px solid #b9c5d9;
+  box-shadow: 0 3px 10px rgba(100, 120, 160, 0.08);
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 6px;
   transition: border-color 0.3s, background 0.3s;
 }
-.subtitle-box.side-a { border-left-color: #4a8bff; background: rgba(47, 111, 237, 0.1); }
-.subtitle-box.side-b { border-left-color: #ffab5c; background: rgba(230, 134, 43, 0.1); }
-.subtitle-box.side-judge { border-left-color: #9a7bff; background: rgba(124, 92, 255, 0.1); }
+.subtitle-box.side-a { border-left-color: #6b9bf0; background: #f5f9ff; }
+.subtitle-box.side-b { border-left-color: #eda659; background: #fdf9f2; }
+.subtitle-box.side-judge { border-left-color: #9a8ade; background: #f8f6fe; }
 .subtitle-head { display: flex; align-items: center; gap: 8px; }
-.speaker-name { font-size: 13px; font-weight: 600; color: #dfe6f8; }
-.speaker-round { font-size: 11px; color: #8b9ab8; }
-.subtitle-text { font-size: 14px; line-height: 1.7; color: #eef2fb; min-height: 42px; }
-.caret { color: #7c5cff; animation: blinkCaret 0.8s step-end infinite; }
+.speaker-name { font-size: 13px; font-weight: 600; color: #2f3b52; }
+.speaker-round { font-size: 11px; color: #93a1b8; }
+.subtitle-text { font-size: 14px; line-height: 1.7; color: #37455e; min-height: 42px; }
+.caret { color: #8f7fe0; animation: blinkCaret 0.8s step-end infinite; }
 @keyframes blinkCaret { 50% { opacity: 0; } }
-.subtitle-query { font-size: 12px; color: #9fc6ff; }
+.subtitle-query { font-size: 12px; color: #5f83c4; }
 .query-tag {
-  background: rgba(74, 139, 255, 0.22); color: #9fc6ff;
+  background: #e2ecfd; color: #4f77bd;
   padding: 1px 6px; border-radius: 3px; margin-right: 6px; font-size: 11px;
 }
-.subtitle-idle { font-size: 13px; color: #7f8ca8; text-align: center; }
+.subtitle-idle { font-size: 13px; color: #9aa7bd; text-align: center; }
 
 .evidence-desk {
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: #fbfcfe;
+  border: 1px dashed #d5deee;
   padding: 8px 10px;
 }
-.desk-title { font-size: 11px; letter-spacing: 3px; color: #8b9ab8; text-align: center; margin-bottom: 6px; }
+.desk-title { font-size: 11px; letter-spacing: 3px; color: #93a1b8; text-align: center; margin-bottom: 6px; }
 .desk-body { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; }
 .evidence-card {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(46, 158, 91, 0.14);
-  border: 1px solid rgba(46, 158, 91, 0.3);
-  border-radius: 5px; padding: 3px 8px; font-size: 11px; max-width: 100%;
+  background: #e9f5ee;
+  border: 1px solid #c8e6d4;
+  color: #3f7d5c;
+  border-radius: 6px; padding: 3px 8px; font-size: 11px; max-width: 100%;
 }
-.ev-type { font-size: 10px; padding: 0 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); }
-.ev-history { background: rgba(230, 162, 60, 0.3); }
-.ev-template { background: rgba(144, 147, 153, 0.3); }
+.ev-type { font-size: 10px; padding: 0 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.75); color: #57705f; }
+.ev-history { background: #f8e9cd; color: #a06c1e; }
+.ev-template { background: #e6e9ee; color: #5c6675; }
 .ev-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
-.desk-empty { font-size: 11px; color: #6d7a94; padding: 4px 2px; }
+.desk-empty { font-size: 11px; color: #a7b3c6; padding: 4px 2px; }
 .desk-queries { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .query-chip {
   font-size: 11px; padding: 2px 8px; border-radius: 10px;
   max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.chip-a { background: rgba(47, 111, 237, 0.2); color: #a9c8ff; }
-.chip-b { background: rgba(230, 134, 43, 0.2); color: #ffc999; }
+.chip-a { background: #e3edfd; color: #4d78c0; }
+.chip-b { background: #fbeed9; color: #b5772e; }
 
 /* 入场动画 */
 .fly-enter-from { opacity: 0; transform: translateX(-24px) scale(0.9); }
@@ -813,25 +1004,25 @@ export default {
 /* 归纳条 */
 .summary-strip { margin-top: 12px; }
 .summary-item {
-  background: rgba(255, 255, 255, 0.05);
-  border-left: 3px solid #8b9ab8;
-  border-radius: 6px;
+  background: #f4f6fb;
+  border-left: 3px solid #aab8d0;
+  border-radius: 8px;
   padding: 8px 12px;
   font-size: 12px;
   animation: bannerIn 0.4s ease-out;
 }
-.summary-tag { color: #a892ff; margin-right: 8px; }
-.summary-text { color: #cfd8ea; }
+.summary-tag { color: #8578cf; margin-right: 8px; }
+.summary-text { color: #55637e; }
 
-/* 终审裁决 */
+/* ===== 终审裁决 ===== */
 .verdict-stage {
   margin-top: 16px;
   display: flex;
   align-items: center;
   gap: 28px;
-  background: linear-gradient(90deg, rgba(124, 92, 255, 0.16), rgba(124, 92, 255, 0.04));
-  border: 1px solid rgba(124, 92, 255, 0.3);
-  border-radius: 10px;
+  background: linear-gradient(90deg, #f4f0fd, #faf8fe);
+  border: 1px solid #e0d6f8;
+  border-radius: 12px;
   padding: 14px 18px;
   animation: bannerIn 0.5s ease-out;
 }
@@ -839,17 +1030,17 @@ export default {
 .gavel.strike { animation: hammer 0.6s ease-out; }
 .gavel-head {
   position: absolute; top: 6px; left: 10px; width: 34px; height: 16px;
-  background: linear-gradient(180deg, #c8b083, #8d6f43);
+  background: linear-gradient(180deg, #d3bb92, #a5825a);
   border-radius: 3px; transform: rotate(-20deg);
 }
 .gavel-handle {
   position: absolute; top: 20px; left: 40px; width: 8px; height: 34px;
-  background: linear-gradient(180deg, #a5844f, #6d552f);
+  background: linear-gradient(180deg, #b08f5f, #82663d);
   border-radius: 3px; transform: rotate(-20deg);
 }
 .gavel-base {
   position: absolute; bottom: 2px; left: 6px; width: 40px; height: 8px;
-  background: rgba(200, 176, 131, 0.35); border-radius: 4px;
+  background: rgba(176, 143, 95, 0.3); border-radius: 4px;
 }
 @keyframes hammer {
   0% { transform: rotate(0deg); }
@@ -860,10 +1051,10 @@ export default {
 .verdict-panel { flex: 1; min-width: 0; }
 .verdict-score { display: flex; align-items: baseline; gap: 4px; }
 .score-num { font-size: 40px; font-weight: 700; font-family: Consolas, monospace; }
-.score-unit { font-size: 14px; color: #8b9ab8; }
+.score-unit { font-size: 14px; color: #93a1b8; }
 .verdict-meta { display: flex; align-items: center; gap: 10px; margin: 4px 0 6px; }
-.verdict-findings { font-size: 12px; color: #9aa8c4; }
-.verdict-summary { font-size: 13px; line-height: 1.7; color: #dfe6f8; }
+.verdict-findings { font-size: 12px; color: #6d7a94; }
+.verdict-summary { font-size: 13px; line-height: 1.7; color: #43507a; }
 
 @keyframes bannerIn {
   from { opacity: 0; transform: translateY(-8px); }
@@ -873,6 +1064,6 @@ export default {
 @media (max-width: 1100px) {
   .party-area { grid-template-columns: 1fr; }
   .seat-row { gap: 24px; }
-  .party { flex-direction: row; }
+  .party { flex-direction: row; flex-wrap: wrap; justify-content: center; }
 }
 </style>

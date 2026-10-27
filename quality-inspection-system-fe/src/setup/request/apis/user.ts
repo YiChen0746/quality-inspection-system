@@ -2,10 +2,10 @@ import request from './main';
 import { AJAX_CONFIG } from '@Common/url';
 
 
-interface TRes {}
-interface TReq {}
+interface TRes { err_code?: number; message?: string; data?: any; [key: string]: any }
+interface TReq { [key: string]: any }
 
-export const logout = async (req: TReq ): Promise<TRes> => {
+export const logout = async (req?: TReq ): Promise<TRes> => {
   const res = await request({
     method: 'get',
     url: AJAX_CONFIG.Logout,
@@ -17,7 +17,7 @@ export const logout = async (req: TReq ): Promise<TRes> => {
   }
 }
 
-export const loginStatus = async (req: TReq ): Promise<TRes> => {
+export const loginStatus = async (req?: TReq ): Promise<TRes> => {
   const res = await request({
     method: 'get',
     url: AJAX_CONFIG.Login_Status,

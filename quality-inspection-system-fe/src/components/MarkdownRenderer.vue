@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed } from 'vue';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
@@ -14,10 +14,9 @@ interface Props {
 
 const props = defineProps<Props>();
 
-// 配置 marked
-onMounted(() => {
-  marked.setOptions({
-    highlight: function(code, lang) {
+// 配置 marked（highlight 选项在 marked v16 类型中已移除，运行时尚可用，故断言）
+(marked.setOptions as any)({
+    highlight: function(code: string, lang: string) {
       if (lang && hljs.getLanguage(lang)) {
         try {
           return hljs.highlight(code, { language: lang }).value;
@@ -30,7 +29,6 @@ onMounted(() => {
     breaks: true,
     gfm: true
   });
-});
 
 const renderedContent = computed(() => {
   if (!props.content) return '';

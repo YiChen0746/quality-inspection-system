@@ -4,11 +4,21 @@
   "exclude": ["src/**/__tests__/*"],
   "compilerOptions": {
     "composite": true,
+    "allowJs": true,
+    "checkJs": false,
+    "strict": false,
+    "allowImportingTsExtensions": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@Common/*": ["./src/common/*"],
+      "@Components/*": ["./src/components/*"],
+      "@Router/*": ["./src/router/*"],
+      "@Setup/*": ["./src/setup/*"],
+      "@Stores/*": ["./src/stores/*"],
+      "@Views/*": ["./src/views/*"]
     }
   }
 }
