@@ -751,8 +751,21 @@ router.post('/review-stream', async (req, res) => {
 // ==================== 历史洞察 ====================
 async function summarizeHistoryForUser(userId) {
   try {
+    // 未识别到用户时直接返回空洞察：避免 where:{} 把其他账号的历史也读进来
+    if (!userId) {
+      return {
+        hasHistory: false,
+        totalRecords: 0,
+        message: '未识别到当前用户，暂无法生成个性化洞察',
+        commonOmissions: [],
+        commonDeficiencies: [],
+        reminders: [],
+        frequentRiskTypes: [],
+        riskLevelDist: { low: 0, mid: 0, high: 0 }
+      };
+    }
     const results = await QualityResult.findAll({
-      where: userId ? { user_id: userId } : {},
+      where: { user_id: userId },
       order: [['created_at', 'DESC']],
       limit: 50,
       attributes: ['id', 'contract_name', 'contract_type', 'contract_summary', 'risk_clauses', 'core_clauses', 'created_at']
@@ -779,13 +792,16 @@ async function summarizeHistoryForUser(userId) {
       })
       .join('\n\n');
 
+    // 按「每份合同」统计风险等级分布，而不是数「高/中/低」字符出现次数：
+    // 入库的风险文本形如 "[高] 第X条：……；[中] 第Y条：……"，一份合同可能同时含多个等级
     const levelDist = { low: 0, mid: 0, high: 0 };
     results.forEach((r) => {
-      if (r.risk_clauses) {
-        levelDist.high += (String(r.risk_clauses).match(/[高]/g) || []).length;
-        levelDist.mid += (String(r.risk_clauses).match(/[中]/g) || []).length;
-        levelDist.low += (String(r.risk_clauses).match(/[低]/g) || []).length;
-      }
+      const text = String(r.risk_clauses || '');
+      const tags = text.match(/\[(高|中|低)\]/g) || [];
+      if (!tags.length) return;
+      if (tags.indexOf('[高]') >= 0) levelDist.high += 1;
+      else if (tags.indexOf('[中]') >= 0) levelDist.mid += 1;
+      else levelDist.low += 1;
     });
 
     const sageCtx = { calls: 0, failedCalls: 0 };

@@ -27,7 +27,7 @@
     <div class="insights-container" v-if="historyInsights">
       <div class="insights-header">
         <h3>🧠 历史洞察 · 个性化经验总结</h3>
-        <button class="insights-refresh" @click="loadHistoryInsights" :disabled="historyLoading">
+        <button class="insights-refresh" @click="loadHistoryInsights(true)" :disabled="historyLoading">
           {{ historyLoading ? '刷新中…' : '刷新洞察' }}
         </button>
       </div>
@@ -100,6 +100,7 @@ export default {
       draftChart: null,
       historyInsights: null,
       historyLoading: false,
+      historyFetchedAt: 0,
       statisticsData: {
         summary: {
           totalReview: 0,
@@ -114,9 +115,12 @@ export default {
     };
   },
   async mounted() {
+    // 放在最前：让 historyLoading 先置位，避免 keep-alive 首次进入时
+    // mounted 与 activated 同时发起两次洞察请求（每次都会消耗一次大模型调用）
+    const insightsTask = this.loadHistoryInsights();
     await this.fetchStatisticsData();
     this.updateCardData();
-    await this.loadHistoryInsights();
+    await insightsTask;
     await this.$nextTick();
     this.renderReviewChart();
     this.renderDraftChart();
@@ -151,7 +155,12 @@ export default {
       return canvas && canvas.isConnected ? canvas : null;
     },
     // 从API获取历史洞察（多智能体 HistorySage 总结）
-    async loadHistoryInsights() {
+    // 该接口内部会调用一次大模型，故做 10 分钟缓存 + 并发去重：
+    // 避免 keep-alive 页面每次切回、以及 mounted/activated 首屏双触发导致的重复调用
+    async loadHistoryInsights(force = false) {
+      if (this.historyLoading) return;
+      const TTL = 10 * 60 * 1000;
+      if (!force && this.historyInsights && Date.now() - this.historyFetchedAt < TTL) return;
       this.historyLoading = true;
       try {
         const resp = await fetch('/api/multi-agent/history-summary', {
@@ -159,6 +168,7 @@ export default {
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
         });
         const data = await resp.json();
+        this.historyFetchedAt = Date.now();
         if (data.err_code === 0 && data.data) {
           this.historyInsights = data.data;
         } else {
