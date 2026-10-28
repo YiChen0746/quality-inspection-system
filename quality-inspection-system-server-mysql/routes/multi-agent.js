@@ -26,7 +26,16 @@ const META_ROLES = {
   partyBLead: { name: 'PartyBLead', label: '相对方·首席抗辩', group: 'partyB' },
   partyBEvidence: { name: 'PartyBEvidence', label: '相对方·条款证据审查', group: 'partyB' },
   partyBLegal: { name: 'PartyBLegal', label: '相对方·法律检索', group: 'partyB' },
-  historySage: { name: 'HistorySage', label: '历史洞察·经验总结', group: 'sage' }
+  historySage: { name: 'HistorySage', label: '历史洞察·经验总结', group: 'sage' },
+  // ===== 合同分析多智能体（合同库治理视角） =====
+  analystStat: { name: 'AnalystStat', label: '统计员·风险分布与趋势', group: 'observe' },
+  analystMiner: { name: 'AnalystMiner', label: '条款挖掘员·高频遗漏', group: 'observe' },
+  analystPattern: { name: 'AnalystPattern', label: '模式识别员·风险聚类', group: 'cognition' },
+  analystAnomaly: { name: 'AnalystAnomaly', label: '异常检测员·偏离预警', group: 'cognition' },
+  analystStrategy: { name: 'AnalystStrategy', label: '策略顾问·改进建议', group: 'advice' },
+  analystNegotiator: { name: 'AnalystNegotiator', label: '谈判推演员·话术底线', group: 'advice' },
+  analystHealth: { name: 'AnalystHealth', label: '健康度评分员·整体评分', group: 'advice' },
+  analystAlert: { name: 'AnalystAlert', label: '到期预警员·履行节点', group: 'advice' }
 };
 
 // 每个元角色只关注自己的职责，避免“全能角色”造成的注意力分散（论文的核心动机）
@@ -101,8 +110,40 @@ const PROMPTS = {
     '5) 历史合同整体风险等级分布（riskLevelDist：{low:n, mid:n, high:n}）；' +
     '所有结论必须基于提供的历史记录内容，不得编造不存在的模式。' +
     '只输出JSON，不要markdown代码块。' +
-    'JSON格式：{"commonOmissions":["..."],"commonDeficiencies":["..."],"reminders":["..."],"frequentRiskTypes":[],"riskLevelDist":{"low":0,"mid":0,"high":0}}'
+    'JSON格式：{"commonOmissions":["..."],"commonDeficiencies":["..."],"reminders":["..."],"frequentRiskTypes":[],"riskLevelDist":{"low":0,"mid":0,"high":0}}',
 
+  // ===== 合同分析多智能体提示词 =====
+  analystStat:
+    '你是【AnalystStat｜统计员】。你将收到用户过往多份合同的审查统计数据（风险等级分布、合同类型分布、月度趋势）。' +
+    '请用中文简要描述这些数据反映的整体风险态势和趋势，重点指出哪类合同风险最高、近期趋势是上升还是下降。150字以内，直接输出文本。',
+  analystMiner:
+    '你是【AnalystMiner｜条款挖掘员】。你将收到用户多份合同的风险条款记录。' +
+    '请归纳出最常缺失或存在缺陷的 5-8 类必备条款，每类说明：条款名称、出现频率（高/中/低）、典型问题。只输出JSON，不要markdown。' +
+    'JSON格式：{"clauses":[{"name":"条款名称","frequency":"高|中|低","issue":"典型问题"}]}',
+  analystPattern:
+    '你是【AnalystPattern｜模式识别员】。你将收到用户多份合同的风险条款记录。' +
+    '请识别 3-5 个反复出现的风险模式（例如"付款条款缺少违约责任"），每个模式说明：模式名称、出现场景、对用户的潜在影响。只输出JSON，不要markdown。' +
+    'JSON格式：{"patterns":[{"name":"模式名称","scenario":"出现场景","impact":"潜在影响"}]}',
+  analystAnomaly:
+    '你是【AnalystAnomaly｜异常检测员】。你将收到一份"异常合同清单"（评分偏低/偏离模板/缺关键条款的合同）。' +
+    '请判断这些合同是否属于真正需要关注的异常，并按优先级排序，说明每份合同的异常原因和建议处理方式（重新审查/补签条款/持续监控）。只输出JSON，不要markdown。' +
+    'JSON格式：{"anomalies":[{"contractName":"合同名","reason":"异常原因","action":"重新审查|补签条款|持续监控","priority":"高|中|低"}]}',
+  analystStrategy:
+    '你是【AnalystStrategy｜策略顾问】。综合前面统计员、条款挖掘员、模式识别员、异常检测员的分析结论，' +
+    '为用户制定 3-5 条可执行的合同库治理改进建议，每条包含：建议内容、预期收益、实施优先级。只输出JSON，不要markdown。' +
+    'JSON格式：{"strategies":[{"content":"建议内容","benefit":"预期收益","priority":"高|中|低"}]}',
+  analystNegotiator:
+    '你是【AnalystNegotiator｜谈判推演员】。用户将指定一类高频风险（如"逾期付款违约金过低"），你需要给出针对该风险的谈判策略。' +
+    '要求：1) 谈判要点（3-5条）；2) 可接受的底线；3) 让步顺序（先让什么、后让什么）；4) 一段可直接使用的谈判话术。只输出JSON，不要markdown。' +
+    'JSON格式：{"points":["要点"],"bottomLine":"可接受底线","concessionOrder":["让步顺序"],"script":"谈判话术"}',
+  analystHealth:
+    '你是【AnalystHealth｜健康度评分员】。你将收到合同库的各项统计指标（风险分布、条款覆盖率、模板合规率、到期合同占比等）。' +
+    '请给出 0-100 的合同库整体健康分（分数越高越健康），并按 5 个维度各打 0-20 分：条款完备性、风险集中度、模板合规率、履行时效、到期管理。只输出JSON，不要markdown。' +
+    'JSON格式：{"totalScore":85,"dimensions":[{"name":"条款完备性","score":18},{"name":"风险集中度","score":17},{"name":"模板合规率","score":16},{"name":"履行时效","score":17},{"name":"到期管理","score":17}],"level":"优秀|良好|一般|需改进","comment":"一句话点评"}',
+  analystAlert:
+    '你是【AnalystAlert｜到期预警员】。你将收到即将到期或需履行节点提醒的合同清单。' +
+    '请按紧急程度（30天内到期/90天内到期/已逾期）分组，并给出每份合同的提醒内容和建议动作。只输出JSON，不要markdown。' +
+    'JSON格式：{"expired":[],"within30":[{"contractName":"合同名","days":剩余天数,"tip":"提醒内容","action":"建议动作"}],"within90":[]}'
 };
 
 // ==================== 基础工具 ====================
@@ -876,6 +917,326 @@ router.get('/history-summary', async (req, res) => {
     return res.json({ err_code: 0, message: '获取成功', data: summary });
   } catch (error) {
     console.error('获取历史洞察失败:', error);
+    return res.status(500).json({ err_code: 500, message: '服务器错误' });
+  }
+});
+
+// ==================== 合同库多智能体分析 ====================
+
+// 读取该用户最近的审查记录（供统计、分析、追问共用）
+async function loadUserResults(userId, limit = 100) {
+  if (!userId) return [];
+  return QualityResult.findAll({
+    where: { user_id: userId },
+    order: [['created_at', 'DESC']],
+    limit,
+    attributes: ['id', 'contract_name', 'contract_type', 'effective_date', 'termination_date', 'contract_summary', 'risk_clauses', 'core_clauses', 'created_at']
+  });
+}
+
+// 解析单份合同的风险等级（取最高）
+function contractRiskLevel(riskText) {
+  const tags = String(riskText || '').match(/\[(高|中|低)\]/g) || [];
+  if (!tags.length) return 'none';
+  if (tags.indexOf('[高]') >= 0) return 'high';
+  if (tags.indexOf('[中]') >= 0) return 'mid';
+  return 'low';
+}
+
+// 从终止日期解析到期天数（解析失败返回 null）
+function daysToTerminate(dateStr) {
+  if (!dateStr) return null;
+  const s = String(dateStr).trim();
+  const m = s.match(/(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (isNaN(d.getTime())) return null;
+  return Math.ceil((d.getTime() - Date.now()) / 86400000);
+}
+
+// 纯统计接口：健康分、条款覆盖、异常清单、到期预警（不调用大模型）
+async function getPortfolioOverview(userId) {
+  const results = await loadUserResults(userId, 100);
+  if (!results.length) {
+    return {
+      hasData: false,
+      total: 0,
+      riskLevelDist: { low: 0, mid: 0, high: 0, none: 0 },
+      typeDist: [],
+      monthlyTrend: [],
+      clauseCoverage: [],
+      abnormalContracts: [],
+      expiryAlerts: { expired: [], within30: [], within90: [] },
+      health: { totalScore: 0, dimensions: [], level: '无数据', comment: '暂无合同审查记录' }
+    };
+  }
+
+  // 1) 风险等级分布
+  const dist = { low: 0, mid: 0, high: 0, none: 0 };
+  results.forEach(r => { dist[contractRiskLevel(r.risk_clauses)] += 1; });
+
+  // 2) 合同类型分布
+  const typeMap = new Map();
+  results.forEach(r => { const t = r.contract_type || '未知类型'; typeMap.set(t, (typeMap.get(t) || 0) + 1); });
+  const typeDist = [...typeMap.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 10);
+
+  // 3) 月度趋势（近 6 个月）
+  const trendMap = new Map();
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    trendMap.set(d.toISOString().slice(0, 7), 0);
+  }
+  results.forEach(r => {
+    if (!r.created_at) return;
+    const key = new Date(r.created_at).toISOString().slice(0, 7);
+    if (trendMap.has(key)) trendMap.set(key, trendMap.get(key) + 1);
+  });
+  const monthlyTrend = [...trendMap.entries()].map(([month, count]) => ({ month, count }));
+
+  // 4) 必备条款覆盖率（关键词命中近似）
+  const clauseKeywords = [
+    { name: '标的/服务内容', keys: ['标的', '服务内容', '服务范围', '货物'] },
+    { name: '价款/支付方式', keys: ['价款', '金额', '支付', '付款', '费用'] },
+    { name: '履行期限', keys: ['期限', '交付', '履行', '完成日期'] },
+    { name: '违约责任', keys: ['违约', '违约金', '赔偿'] },
+    { name: '知识产权', keys: ['知识产权', '著作权', '专利', '版权'] },
+    { name: '保密条款', keys: ['保密', '商业秘密'] },
+    { name: '争议解决', keys: ['争议', '仲裁', '诉讼', '管辖'] },
+    { name: '不可抗力', keys: ['不可抗力'] }
+  ];
+  const clauseCoverage = clauseKeywords.map(c => {
+    let hit = 0;
+    results.forEach(r => {
+      const text = (r.risk_clauses || '') + (r.core_clauses || '') + (r.contract_summary || '');
+      if (c.keys.some(k => text.includes(k))) hit += 1;
+    });
+    return { name: c.name, covered: hit, total: results.length, ratio: results.length ? Math.round(hit / results.length * 100) : 0 };
+  });
+
+  // 5) 异常合同：高风险 or 无风险等级（可能未完整审查）
+  const abnormalContracts = results
+    .map(r => ({
+      id: r.id,
+      contractName: r.contract_name || `合同ID:${r.id}`,
+      contractType: r.contract_type || '',
+      riskLevel: contractRiskLevel(r.risk_clauses),
+      createdAt: r.created_at
+    }))
+    .filter(r => r.riskLevel === 'high' || r.riskLevel === 'none')
+    .slice(0, 20);
+
+  // 6) 到期预警
+  const expiryAlerts = { expired: [], within30: [], within90: [] };
+  results.forEach(r => {
+    const days = daysToTerminate(r.termination_date);
+    if (days === null) return;
+    const item = {
+      id: r.id,
+      contractName: r.contract_name || `合同ID:${r.id}`,
+      contractType: r.contract_type || '',
+      days,
+      terminateDate: r.termination_date
+    };
+    if (days < 0) expiryAlerts.expired.push({ ...item, tip: `已逾期 ${-days} 天`, action: '立即评估续签或追责' });
+    else if (days <= 30) expiryAlerts.within30.push({ ...item, tip: `${days} 天后到期`, action: '启动续签流程' });
+    else if (days <= 90) expiryAlerts.within90.push({ ...item, tip: `${days} 天后到期`, action: '提前准备续签谈判' });
+  });
+
+  // 7) 健康分（简单加权：风险分布 + 条款覆盖 + 到期管理）
+  const avgCoverage = clauseCoverage.reduce((s, c) => s + c.ratio, 0) / (clauseCoverage.length || 1);
+  const highRatio = results.length ? dist.high / results.length : 0;
+  const expiredRatio = results.length ? expiryAlerts.expired.length / results.length : 0;
+  const clauseScore = Math.round(avgCoverage * 0.2);
+  const riskScore = Math.round(Math.max(0, 20 - highRatio * 40));
+  const templateScore = 16; // 无模板对比时给基础分
+  const performanceScore = 17;
+  const expiryScore = Math.round(Math.max(0, 20 - expiredRatio * 40));
+  const totalScore = clauseScore + riskScore + templateScore + performanceScore + expiryScore;
+  const level = totalScore >= 85 ? '优秀' : totalScore >= 70 ? '良好' : totalScore >= 55 ? '一般' : '需改进';
+
+  return {
+    hasData: true,
+    total: results.length,
+    riskLevelDist: dist,
+    typeDist,
+    monthlyTrend,
+    clauseCoverage,
+    abnormalContracts,
+    expiryAlerts,
+    health: {
+      totalScore,
+      dimensions: [
+        { name: '条款完备性', score: clauseScore },
+        { name: '风险集中度', score: riskScore },
+        { name: '模板合规率', score: templateScore },
+        { name: '履行时效', score: performanceScore },
+        { name: '到期管理', score: expiryScore }
+      ],
+      level,
+      comment: `${level}：共 ${results.length} 份合同，高风险 ${dist.high} 份，条款平均覆盖率 ${Math.round(avgCoverage)}%`
+    }
+  };
+}
+
+router.get('/portfolio-overview', async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    const data = await getPortfolioOverview(userId);
+    return res.json({ err_code: 0, message: '获取成功', data });
+  } catch (error) {
+    console.error('获取合同库概览失败:', error);
+    return res.status(500).json({ err_code: 500, message: '服务器错误' });
+  }
+});
+
+// 把多份审查记录压缩成分析用文本
+function buildHistoryText(results, maxChars = 12000) {
+  const text = results
+    .map((r, i) => {
+      const summary = r.contract_summary ? '摘要: ' + String(r.contract_summary).slice(0, 200) : '';
+      const risks = r.risk_clauses ? '风险: ' + String(r.risk_clauses).slice(0, 400) : '';
+      return `--- #${i + 1} ${r.contract_name || '未命名'} | ${r.contract_type || ''} ---\n${summary}\n${risks}`;
+    })
+    .join('\n\n');
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+// 流式多智能体合同库分析：8 个角色依次发言
+async function analyzePortfolio(userId, emit) {
+  const ctx = { calls: 0, failedCalls: 0, emit };
+  const results = await loadUserResults(userId, 80);
+
+  if (!results || results.length < 2) {
+    emit('notice', { message: '至少需要 2 份审查记录才能进行多智能体分析' });
+    emit('done', { hasData: false, total: results ? results.length : 0 });
+    return;
+  }
+
+  emit('start', { total: results.length, model: LLM_MODEL });
+
+  const overview = await getPortfolioOverview(userId);
+  emit('overview', overview);
+
+  const historyText = buildHistoryText(results);
+  const statText = `风险等级分布：高${overview.riskLevelDist.high}/中${overview.riskLevelDist.mid}/低${overview.riskLevelDist.low}/无${overview.riskLevelDist.none}；` +
+    `合同类型分布：${overview.typeDist.slice(0, 5).map(t => t.name + t.count + '份').join('、')}；` +
+    `月度趋势：${overview.monthlyTrend.map(m => m.month + ':' + m.count).join(' ')}`;
+
+  // 观察组
+  const statOut = await callRole(ctx, 'analystStat', statText, { maxTokens: 600, temperature: 0.3 });
+  const minerOut = await callRole(ctx, 'analystMiner', '以下是用户多份合同的风险条款记录，请归纳高频缺失/缺陷条款：\n\n' + historyText, { maxTokens: 800, temperature: 0.3 });
+  const minerData = parseJson(minerOut) || { clauses: [] };
+  emit('miner', minerData);
+
+  // 认知组
+  const patternOut = await callRole(ctx, 'analystPattern', '以下是用户多份合同的风险条款记录，请识别反复出现的风险模式：\n\n' + historyText, { maxTokens: 800, temperature: 0.3 });
+  const patternData = parseJson(patternOut) || { patterns: [] };
+  emit('pattern', patternData);
+
+  const anomalyText = overview.abnormalContracts.length
+    ? overview.abnormalContracts.map(a => `${a.contractName}（${a.contractType}，风险:${a.riskLevel}）`).join('\n')
+    : '无明显异常合同';
+  const anomalyOut = await callRole(ctx, 'analystAnomaly', '异常合同清单：\n' + anomalyText, { maxTokens: 800, temperature: 0.3 });
+  const anomalyData = parseJson(anomalyOut) || { anomalies: [] };
+  emit('anomaly', anomalyData);
+
+  // 建议组
+  const strategyOut = await callRole(ctx, 'analystStrategy',
+    `统计结论：${statOut || ''}\n条款挖掘：${JSON.stringify(minerData)}\n风险模式：${JSON.stringify(patternData)}\n异常：${JSON.stringify(anomalyData)}`,
+    { maxTokens: 1000, temperature: 0.3 });
+  const strategyData = parseJson(strategyOut) || { strategies: [] };
+  emit('strategy', strategyData);
+
+  const healthOut = await callRole(ctx, 'analystHealth',
+    `统计指标：风险分布高${overview.riskLevelDist.high}/中${overview.riskLevelDist.mid}/低${overview.riskLevelDist.low}；条款平均覆盖率 ${overview.health.dimensions[0] ? overview.health.dimensions[0].score * 5 : 0}%；到期合同 ${overview.expiryAlerts.expired.length + overview.expiryAlerts.within30.length} 份`,
+    { maxTokens: 600, temperature: 0.3 });
+  const healthData = parseJson(healthOut) || overview.health;
+  emit('health', healthData);
+
+  const alertOut = await callRole(ctx, 'analystAlert',
+    `到期合同清单：\n已逾期：${overview.expiryAlerts.expired.map(a => a.contractName + '(' + a.days + '天)').join('、') || '无'}\n30天内：${overview.expiryAlerts.within30.map(a => a.contractName + '(' + a.days + '天)').join('、') || '无'}\n90天内：${overview.expiryAlerts.within90.map(a => a.contractName + '(' + a.days + '天)').join('、') || '无'}`,
+    { maxTokens: 800, temperature: 0.3 });
+  const alertData = parseJson(alertOut) || overview.expiryAlerts;
+  emit('alert', alertData);
+
+  emit('done', {
+    hasData: true,
+    total: results.length,
+    calls: ctx.calls,
+    failedCalls: ctx.failedCalls,
+    summary: {
+      stat: statOut,
+      clauses: minerData.clauses,
+      patterns: patternData.patterns,
+      anomalies: anomalyData.anomalies,
+      strategies: strategyData.strategies,
+      health: healthData,
+      alerts: alertData
+    }
+  });
+}
+
+router.post('/analyze-stream', async (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  let closed = false;
+  res.on('close', () => { closed = true; });
+  const emit = (type, data) => {
+    if (closed) return;
+    try { res.write(JSON.stringify({ type, data }) + '\n'); } catch (e) { closed = true; }
+  };
+  const heartbeat = setInterval(() => {
+    if (closed) return;
+    try { res.write(JSON.stringify({ type: 'ping', ts: Date.now() }) + '\n'); } catch (e) { closed = true; }
+  }, 15000);
+  try {
+    await analyzePortfolio(req.user?.id || null, emit);
+  } catch (error) {
+    console.error('多智能体合同库分析异常:', error);
+    emit('error', { status: 500, message: error.message });
+  } finally {
+    clearInterval(heartbeat);
+    if (!closed) res.end();
+  }
+});
+
+// 谈判推演：针对指定风险类型给出谈判策略
+router.post('/negotiate', async (req, res) => {
+  try {
+    const { riskType } = req.body || {};
+    if (!riskType) return res.status(400).json({ err_code: 400, message: '缺少 riskType 参数' });
+    const ctx = { calls: 0, failedCalls: 0 };
+    const out = await callRole(ctx, 'analystNegotiator', '风险类型：' + riskType, { maxTokens: 1200, temperature: 0.3 });
+    const data = parseJson(out) || {};
+    return res.json({ err_code: 0, message: '获取成功', data, calls: ctx.calls });
+  } catch (error) {
+    console.error('谈判推演失败:', error);
+    return res.status(500).json({ err_code: 500, message: '服务器错误' });
+  }
+});
+
+// 交互式追问：基于用户历史记录回答问题
+router.post('/history-qa', async (req, res) => {
+  try {
+    const { question } = req.body || {};
+    if (!question) return res.status(400).json({ err_code: 400, message: '缺少 question 参数' });
+    const userId = req.user?.id || null;
+    const results = await loadUserResults(userId, 80);
+    const historyText = buildHistoryText(results);
+    const ctx = { calls: 0, failedCalls: 0 };
+    const answer = await callLLM(
+      '你是合同库分析助手。基于用户提供的历史审查记录回答用户问题，所有结论必须基于记录内容，没有依据时直接说明"暂无相关记录"。中文，简洁，200字以内。',
+      '历史记录：\n' + historyText + '\n\n用户问题：' + question,
+      { maxTokens: 600, temperature: 0.3 }
+    );
+    return res.json({ err_code: 0, message: '获取成功', data: { answer: answer || '暂无相关记录或分析失败', calls: ctx.calls } });
+  } catch (error) {
+    console.error('历史追问失败:', error);
     return res.status(500).json({ err_code: 500, message: '服务器错误' });
   }
 });
