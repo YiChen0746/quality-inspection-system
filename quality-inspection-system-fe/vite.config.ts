@@ -22,10 +22,26 @@ export default defineConfig({
     vue(),
   ],
   server: {
+    // 监听所有网卡：答辩现场用手机或同网段电脑访问 http://<本机IP>:5173
+    host: true,
     proxy: backendProxy,
   },
   preview: {
+    host: true,
     proxy: backendProxy,
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // 把体积最大的公共依赖拆成独立 chunk，避免首屏加载单个 2MB 文件
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-ui': ['element-plus', '@element-plus/icons-vue'],
+          'vendor-charts': ['echarts'],
+          'vendor-doc': ['docx-preview', 'docxtemplater']
+        }
+      }
+    }
   },
   resolve: {
     alias: {

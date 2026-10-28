@@ -15,6 +15,9 @@ const getContractFiles = async (req, res) => {
     if (userId) {
       where.user_id = userId;
     }
+    // 多智能体批量审查会为“只有正文、没有文件”的合同建占位记录（contract_type=multi-agent），
+    // 它们只用于承载审查结果，不应出现在文件/合同列表中
+    where.contract_type = { [Op.ne]: 'multi-agent' };
 
     // 查询合同文件列表
     const contracts = await Contract.findAll({
@@ -126,6 +129,9 @@ const searchContractFiles = async (req, res) => {
     // 合同类型筛选
     if (contractType) {
       where.contract_type = contractType;
+    } else {
+      // 未指定类型时排除多智能体占位合同（见 getContractFiles 的说明）
+      where.contract_type = { [Op.ne]: 'multi-agent' };
     }
 
     if (userId) {

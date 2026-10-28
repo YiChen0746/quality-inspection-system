@@ -631,7 +631,26 @@ async function handleReview(req, res, emit) {
     const verdict = await finalVerdict(ctx, name, content, focuses, allEntries, allResidual, knowledge, historyInsights);
 
     // 持久化审查结论，作为后续审查的“历史案例”知识源
-    if (contractId) {
+    // 批量审查入口只上传正文、不传 contractId：此时先建一条占位合同，
+    // 保证审查结果能入库（quality_results.contract_id 为 NOT NULL），历史洞察才能持续积累
+    let effectiveContractId = contractId ? parseInt(contractId, 10) : null;
+    if (!effectiveContractId) {
+      try {
+        const placeholder = await Contract.create({
+          file_name: (name || '未命名合同') + '.txt',
+          file_path: '',
+          file_size: 0,
+          content: String(content || '').slice(0, 20000),
+          contract_type: 'multi-agent',
+          user_id: req.user?.id || null
+        });
+        effectiveContractId = placeholder.id;
+      } catch (createError) {
+        console.warn('批量审查占位合同创建失败（本次结果不入库）:', createError.message);
+      }
+    }
+
+    if (effectiveContractId) {
       try {
         const riskText = [
           `风险评分：${verdict.score ?? '-'}（${verdict.level || '未知'}）`,
@@ -640,7 +659,7 @@ async function handleReview(req, res, emit) {
           )
         ].join('\n');
         await QualityResult.create({
-          contract_id: parseInt(contractId),
+          contract_id: effectiveContractId,
           contract_name: name || '未命名合同',
           contract_type: '多智能体审查',
           contract_summary: verdict.summary || '',
@@ -674,7 +693,9 @@ async function handleReview(req, res, emit) {
       verdict,
       historyInsights,
       stats: {
-        llmCalls: ctx.calls,
+        // 主庭审调用 + 历史洞察调用，避免页面数字漏算历史洞察那一次
+        llmCalls: ctx.calls + (historyInsights && historyInsights.calls ? historyInsights.calls : 0),
+        sageCalls: historyInsights && historyInsights.calls ? historyInsights.calls : 0,
         failedCalls: ctx.failedCalls,
         elapsedMs: Date.now() - startedAt
       }
@@ -761,7 +782,8 @@ async function summarizeHistoryForUser(userId) {
         commonDeficiencies: [],
         reminders: [],
         frequentRiskTypes: [],
-        riskLevelDist: { low: 0, mid: 0, high: 0 }
+        riskLevelDist: { low: 0, mid: 0, high: 0 },
+        calls: 0
       };
     }
     const results = await QualityResult.findAll({
@@ -780,7 +802,8 @@ async function summarizeHistoryForUser(userId) {
         commonDeficiencies: [],
         reminders: [],
         frequentRiskTypes: [],
-        riskLevelDist: { low: 0, mid: 0, high: 0 }
+        riskLevelDist: { low: 0, mid: 0, high: 0 },
+        calls: 0
       };
     }
 
@@ -826,7 +849,9 @@ async function summarizeHistoryForUser(userId) {
         low: Number(dist.low) || levelDist.low || 0,
         mid: Number(dist.mid) || levelDist.mid || 0,
         high: Number(dist.high) || levelDist.high || 0
-      }
+      },
+      // 本次历史洞察实际消耗的大模型调用次数，供页面统计使用
+      calls: sageCtx.calls
     };
   } catch (error) {
     console.warn('历史洞察生成失败（降级返回空）:', error.message);
@@ -838,7 +863,8 @@ async function summarizeHistoryForUser(userId) {
       commonDeficiencies: [],
       reminders: [],
       frequentRiskTypes: [],
-      riskLevelDist: { low: 0, mid: 0, high: 0 }
+      riskLevelDist: { low: 0, mid: 0, high: 0 },
+      calls: 0
     };
   }
 }

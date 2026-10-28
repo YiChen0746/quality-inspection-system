@@ -49,3 +49,11 @@ quality-inspection-system-server/
 
 # 备份/禁用的 git 目录
 .git_disabled/
+
+# 本地临时快照与一次性脚本（同步队友代码时的备份、截图、排查脚本，不发布）
+_backup_*/
+_fixed_snapshot/
+_review_remote/
+_shots/
+**/_cleanup.js
+**/_getcode.js

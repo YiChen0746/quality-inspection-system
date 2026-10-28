@@ -39,7 +39,7 @@
               :before-upload="beforeUpload"
               :on-change="handleFileChange"
               :show-file-list="false"
-              accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+              accept=".jpg,.jpeg,.png,.docx"
               :class="{ 'is-dragover': isDragover }"
               @dragover="isDragover = true"
               @dragleave="isDragover = false"
@@ -57,7 +57,7 @@
                     已选择 {{ selectedFiles.length }} 个文件，可继续添加
                   </div>
                   <div class="secondary-text">
-                    支持 JPG、PNG、PDF、DOC、DOCX 格式，单文件最大 10MB；合同照片将自动 OCR 识别文字；支持一次批量导入多份合同
+                    支持 JPG、PNG、DOCX 格式，单文件最大 10MB；合同照片将自动 OCR 识别文字；支持一次批量导入多份合同
                   </div>
                 </div>
               </div>
@@ -585,12 +585,12 @@ const currentStatusDesc = computed(() => {
 
 // 文件上传前验证
 const beforeUpload = (file: File) => {
-  const isValidType = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 
-                      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+  const isValidType = ['image/jpeg', 'image/jpg', 'image/png',
+                      'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
                       .includes(file.type);
   
   if (!isValidType) {
-    ElMessage.error('只支持 JPG、PNG、PDF、DOC、DOCX 格式的文件！');
+    ElMessage.error('只支持 JPG、PNG、DOCX 格式的文件！');
     return false;
   }
 
@@ -608,11 +608,11 @@ const handleFileChange = (file: any) => {
   if (!file.raw) return;
   const raw = file.raw as File;
 
-  const isValidType = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf',
-                      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+  const isValidType = ['image/jpeg', 'image/jpg', 'image/png',
+                      'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
                       .includes(raw.type);
   if (!isValidType) {
-    ElMessage.error(`「${raw.name}」格式不支持，仅支持 JPG、PNG、PDF、DOC、DOCX`);
+    ElMessage.error(`「${raw.name}」格式不支持，仅支持 JPG、PNG、DOCX`);
     return;
   }
   if (raw.size / 1024 / 1024 >= 10) {
@@ -849,6 +849,8 @@ const handleProcessStep = (data: any, fileName: string, settleOnce: (fn: () => v
     case 'ocr_error':
       addProcessLog('error', `「${fileName}」${data.message}`);
       batchResults.value.push({ fileName, data: null, error: data.message });
+      // 格式不支持等可预期错误直接提示原因，而不是只显示“所有文件均审查失败”
+      ElMessage.error(`「${fileName}」${data.message}`);
       settleOnce(() => resolve(null)); // 批量模式下继续处理下一份
       break;
 

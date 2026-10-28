@@ -130,6 +130,10 @@
             </transition-group>
             <div class="desk-empty" v-if="!visibleKnowledge.length">检索式命中后，法条会飞入此处</div>
           </div>
+          <div class="desk-history" v-if="historyRecords">
+            <span class="dh-badge">历史洞察</span>
+            <span class="dh-text">已参考您过往 {{ historyRecords }} 份合同的经验</span>
+          </div>
           <div class="desk-queries" v-if="queryChips.length">
             <span class="query-chip" v-for="(q, i) in queryChips" :key="i" :class="q.side === 'B' ? 'chip-b' : 'chip-a'">
               {{ q.text }}
@@ -221,6 +225,8 @@ export default {
       knowledge: [],
       queryChips: [],
       summaryList: [],
+      historyRecords: 0,
+      historyNote: '',
       verdictVisible: false,
       verdictScore: 0,
       verdictData: null,
@@ -347,6 +353,8 @@ export default {
       this.knowledge = [];
       this.queryChips = [];
       this.summaryList = [];
+      this.historyRecords = 0;
+      this.historyNote = '';
       this.verdictVisible = false;
       this.verdictScore = 0;
       this.verdictData = null;
@@ -392,6 +400,10 @@ export default {
           break;
         case 'summary':
           this.ops.push({ kind: 'summary', agreed: (d.agreed || []).length, residual: (d.residual || []).length });
+          break;
+        case 'history-insights':
+          // HistorySage 的历史经验：以“案例”卡片落到证据台，并记下参考的合同份数
+          this.ops.push({ kind: 'history', data: d });
           break;
         case 'verdict':
           this.ops.push({ kind: 'verdict', data: d });
@@ -521,6 +533,25 @@ export default {
         case 'summary':
           this.summaryList.push({ agreed: op.agreed, residual: op.residual });
           break;
+        case 'history': {
+          const d = op.data || {};
+          if (!d.hasHistory) break;
+          const items = [];
+          const pushItem = (text, idx) => {
+            const t = String(text || '').trim();
+            if (!t) return;
+            items.push({ id: 'history-' + idx + '-' + t.slice(0, 12), type: 'history', title: t });
+          };
+          (d.reminders || []).slice(0, 2).forEach((t, i) => pushItem(t, i));
+          (d.commonOmissions || []).slice(0, 1).forEach((t, i) => pushItem(t, 10 + i));
+          if (!items.length) pushItem(d.message, 99);
+          const map = new Map(this.knowledge.map((k) => [k.id, k]));
+          items.forEach((item) => map.set(item.id, item));
+          this.knowledge = Array.from(map.values());
+          this.historyRecords = Number(d.totalRecords) || 0;
+          this.historyNote = d.message || '';
+          break;
+        }
         case 'verdict':
           this.verdictData = op.data;
           this.verdictVisible = true;
@@ -581,6 +612,16 @@ export default {
         }
         if (op.kind === 'query') this.queryChips.push({ side: op.side, text: op.query });
         if (op.kind === 'summary') this.summaryList.push({ agreed: op.agreed, residual: op.residual });
+        if (op.kind === 'history' && op.data && op.data.hasHistory) {
+          this.historyRecords = Number(op.data.totalRecords) || 0;
+          this.historyNote = op.data.message || '';
+          const items = (op.data.reminders || []).slice(0, 2).map((t, i) => ({
+            id: 'history-skip-' + i, type: 'history', title: String(t || '')
+          })).filter((it) => it.title.trim());
+          const map = new Map(this.knowledge.map((k) => [k.id, k]));
+          items.forEach((item) => map.set(item.id, item));
+          this.knowledge = Array.from(map.values());
+        }
         if (op.kind === 'verdict') {
           this.verdictData = op.data;
           this.verdictVisible = true;
@@ -989,6 +1030,12 @@ export default {
 .ev-template { background: #e6e9ee; color: #5c6675; }
 .ev-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .desk-empty { font-size: 11px; color: #a7b3c6; padding: 4px 2px; }
+.desk-history { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.dh-badge {
+  padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  background: rgba(124, 92, 255, 0.18); color: #b9a7ff;
+}
+.dh-text { font-size: 11px; color: #9aa7c7; }
 .desk-queries { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .query-chip {
   font-size: 11px; padding: 2px 8px; border-radius: 10px;

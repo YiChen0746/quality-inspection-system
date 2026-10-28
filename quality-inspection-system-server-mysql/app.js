@@ -109,6 +109,16 @@ app.use(function(err, req, res, next) {
     });
   }
 
+  // 业务校验错误（如文件格式不支持）：保留路由指定的 4xx 状态码，
+  // 避免“格式不支持”被统一当成 500 服务器故障
+  const bizStatus = err && (err.status || err.statusCode);
+  if (bizStatus && bizStatus >= 400 && bizStatus < 500) {
+    return res.status(bizStatus).json({
+      err_code: bizStatus,
+      message: err.message || '请求不合法'
+    });
+  }
+
   // 其他错误
   res.status(500).json({
     err_code: 500,

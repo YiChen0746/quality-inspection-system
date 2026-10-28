@@ -54,7 +54,10 @@ const upload = multer({
     if (mimetype && extname) {
       return cb(null, true);
     } else {
-      cb(new Error('只支持图片、PDF和Word文档格式'));
+      // 带上业务状态码，让全局错误处理返回 400 而不是 500
+      const err = new Error('只支持 JPG/PNG 图片与 DOCX 文档（PDF/DOC 暂不支持）');
+      err.status = 400;
+      cb(err);
     }
   }
 });
@@ -238,12 +241,8 @@ ${contractContent}
         max_tokens: 4000
       };
 
-      console.log('发送AI分析请求...');
-      console.log('请求URL:', `${DEEPSEEK_CONFIG.baseURL}/chat/completions`);
-      console.log('请求头:', {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_CONFIG.apiKey.substring(0, 10)}...`
-      });
+      // 只记录模型与地址，不打印任何密钥片段
+      console.log('[llm] model=' + DEEPSEEK_CONFIG.model + ', base=' + DEEPSEEK_CONFIG.baseURL);
 
       const response = await axios.post(`${DEEPSEEK_CONFIG.baseURL}/chat/completions`, requestBody, {
         headers: {
@@ -359,12 +358,11 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         
         contractContent = await extractImageText(filePath);
         
-        // 打印OCR结果用于调试
-        console.log('=== OCR识别结果 ===');
-        console.log('文件路径:', filePath);
-        console.log('识别内容长度:', contractContent.length);
-        console.log('识别内容:', contractContent);
-        console.log('=== OCR结果结束 ===');
+        // 只记录类型与长度：合同全文可能含身份证号、银行账号等敏感信息，不写入日志
+        console.log('[ocr] type=' + fileExtension + ', chars=' + contractContent.length);
+        if (process.env.DEBUG_CONTRACT === '1') {
+          console.log('[ocr][debug] preview:', contractContent.slice(0, 80));
+        }
         
       } else if (fileExtension === '.docx') {
         res.write(JSON.stringify({
@@ -376,20 +374,22 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         // 直接从DOCX提取文本内容
         contractContent = await extractDocxText(filePath);
         
-        // 打印提取结果用于调试
-        console.log('=== DOCX文本提取结果 ===');
-        console.log('文件路径:', filePath);
-        console.log('提取内容长度:', contractContent.length);
-        console.log('提取内容:', contractContent);
-        console.log('=== 提取结果结束 ===');
+        // 只记录类型与长度，不打印文档全文
+        console.log('[docx] type=' + fileExtension + ', chars=' + contractContent.length);
+        if (process.env.DEBUG_CONTRACT === '1') {
+          console.log('[docx][debug] preview:', contractContent.slice(0, 80));
+        }
         
       } else if (['.pdf', '.doc'].includes(fileExtension)) {
-        // 对于PDF和DOC文档，暂时不支持
-        contractContent = '此文档类型暂不支持处理，请上传DOCX、JPG、PNG格式的合同文件';
-        console.log('=== 文档类型提示 ===');
-        console.log('文件类型:', fileExtension);
-        console.log('提示内容:', contractContent);
-        console.log('=== 提示结束 ===');
+        // PDF/DOC 暂不做真解析：直接报错并清理临时文件，
+        // 避免把“不支持”的提示语当成合同正文继续送 AI 分析、并把无效结果写入数据库。
+        fs.unlink(filePath, () => {});
+        res.write(JSON.stringify({
+          err_code: 400,
+          step: 'ocr_error',
+          message: '暂不支持 PDF/DOC，请改用 DOCX 或 JPG/PNG 图片上传'
+        }) + '\n');
+        return res.end();
       } else {
         throw new Error('不支持的文件格式');
       }
@@ -416,20 +416,13 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         message: '正在进行AI合同分析...'
       }) + '\n');
 
-      // 打印发送给AI的内容
-      console.log('=== 发送给AI分析的内容 ===');
-      console.log('分析立场:', analysis_position);
-      console.log('合同内容长度:', contractContent.length);
-      console.log('合同内容预览:', contractContent.substring(0, 500) + (contractContent.length > 500 ? '...' : ''));
-      console.log('=== AI输入内容结束 ===');
+      // 只记录立场与长度，不打印合同内容
+      console.log('[ai-input] position=' + analysis_position + ', chars=' + contractContent.length);
       
       const analysisResult = await analyzeContract(contractContent, analysis_position);
       
-      // 打印AI分析结果
-      console.log('=== AI分析结果 ===');
-      console.log('分析结果长度:', analysisResult.length);
-      console.log('分析结果:', analysisResult);
-      console.log('=== AI分析结果结束 ===');
+      // 只记录结果长度，不打印模型原始输出
+      console.log('[ai-result] chars=' + analysisResult.length);
 
       // 保存合同到数据库
       const contract = await Contract.create({
@@ -441,9 +434,7 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
         contract_type: 'review'
       });
 
-      // 解析分析结果并保存
-      console.log('=== 开始解析AI分析结果 ===');
-      console.log('原始分析结果:', analysisResult);
+      // 解析分析结果并保存（模型原始输出不落日志）
       
       const contractName = extractContent(analysisResult, '1. 合同名称', '2. 合同类型');
       const contractType = extractContent(analysisResult, '2. 合同类型', '3. 生效日期');
@@ -455,18 +446,11 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
       const riskClauses = extractContent(analysisResult, '8. 风险条款解读', '9. 核心条款解读');
       const coreClauses = extractContent(analysisResult, '9. 核心条款解读', null);
 
-      // 打印提取的字段内容用于调试
-      console.log('=== 提取的字段内容 ===');
-      console.log('合同名称:', contractName);
-      console.log('合同类型:', contractType);
-      console.log('生效日期:', effectiveDate);
-      console.log('终止日期:', terminationDate);
-      console.log('管辖权:', jurisdiction);
-      console.log('涉及主体:', partiesInvolved);
-      console.log('合同摘要:', contractSummary);
-      console.log('风险条款:', riskClauses);
-      console.log('核心条款:', coreClauses);
-      console.log('=== 字段内容结束 ===');
+      // 字段解析情况只记录“是否解析成功”，不打印具体内容
+      console.log('[ai-parse] fields=' + [
+        contractName, contractType, effectiveDate, terminationDate,
+        jurisdiction, partiesInvolved, contractSummary, riskClauses, coreClauses
+      ].filter((v) => v && String(v).trim()).length + '/9');
 
       const qualityResult = await QualityResult.create({
         contract_id: contract.id,
@@ -539,7 +523,9 @@ const uploadExtract = multer({
     if (extOk) {
       return cb(null, true);
     }
-    cb(new Error('文字提取暂支持 DOCX、TXT、JPG、PNG 格式'));
+    const err = new Error('文字提取暂支持 DOCX、TXT、JPG、PNG 格式');
+    err.status = 400;
+    cb(err);
   }
 });
 
@@ -899,9 +885,8 @@ router.get('/history', async (req, res) => {
 // 导出合同审查报告
 router.post('/export_review_report', async (req, res) => {
   try {
+    // 不打印请求头：其中包含用户的 Authorization Token
     console.log('开始处理导出报告请求...');
-    console.log('请求体:', req.body);
-    console.log('请求头:', req.headers);
     
     const { result_id } = req.body;
     

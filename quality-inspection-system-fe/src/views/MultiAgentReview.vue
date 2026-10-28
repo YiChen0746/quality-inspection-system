@@ -66,7 +66,7 @@
             <el-button size="small" :loading="extracting" :disabled="loading" @click="triggerOcrInput">
               识别图片文字
             </el-button>
-            <span class="batch-hint">支持 docx / txt / 合同照片；批量导入时每份合同各开一场庭审</span>
+            <span class="batch-hint">支持 docx / txt / 合同照片（JPG、PNG）；批量导入时每份合同各开一场庭审</span>
           </div>
 
           <!-- 批量审查队列：每份合同一个独立庭审任务 -->
@@ -84,6 +84,15 @@
 
           <div class="input-footer">
             <span class="char-count">{{ form.contractContent.length }} 字</span>
+            <el-button
+              v-if="loading && batchTasks.length"
+              size="small"
+              type="danger"
+              plain
+              @click="stopBatch"
+            >
+              停止批量
+            </el-button>
             <el-button
               type="primary"
               :loading="loading"
@@ -195,6 +204,7 @@
               <div class="verdict-meta">
                 <span>模型：{{ displayResult.model }}</span>
                 <span>大模型调用：{{ displayResult.stats.llmCalls }} 次（失败 {{ displayResult.stats.failedCalls }} 次）</span>
+                <span v-if="displayResult.stats.sageCalls">其中历史洞察 {{ displayResult.stats.sageCalls }} 次</span>
                 <span>耗时：{{ (displayResult.stats.elapsedMs / 1000).toFixed(1) }} 秒</span>
                 <span>检索法条：{{ displayResult.knowledge.length }} 条</span>
               </div>
@@ -209,6 +219,23 @@
             <el-tabs v-model="activeTab">
               <!-- 审查结论 -->
               <el-tab-pane label="审查结论" name="verdict">
+                <!-- 历史洞察：HistorySage 的产出，展示为个性化风险提醒 -->
+                <div class="history-insight" v-if="historyInsight">
+                  <div class="hi-head">
+                    <span class="hi-badge">历史洞察</span>
+                    <span class="hi-meta">基于您过往 {{ historyInsight.totalRecords }} 份合同的审查记录</span>
+                  </div>
+                  <div class="hi-message">{{ historyInsight.message }}</div>
+                  <ul class="hi-list" v-if="(historyInsight.reminders || []).length">
+                    <li v-for="(item, i) in (historyInsight.reminders || [])" :key="i">{{ item }}</li>
+                  </ul>
+                  <div class="hi-dist" v-if="historyInsight.riskLevelDist">
+                    <span class="hi-dist-item hi-high">高风险 {{ historyInsight.riskLevelDist.high }} 份</span>
+                    <span class="hi-dist-item hi-mid">中风险 {{ historyInsight.riskLevelDist.mid }} 份</span>
+                    <span class="hi-dist-item hi-low">低风险 {{ historyInsight.riskLevelDist.low }} 份</span>
+                  </div>
+                </div>
+
                 <div class="section-title">风险条款（{{ displayResult.verdict.findings.length }}）</div>
                 <el-table
                   v-if="displayResult.verdict.findings.length"
@@ -383,6 +410,7 @@ export default {
       batchTasks: [],
       activeTaskId: null,
       extracting: false,
+      batchStopped: false,
       roleGroups: [
         {
           title: '审判组 JudgeTeam',
@@ -447,6 +475,11 @@ export default {
       if (level === '低') return 'success';
       if (level === '高') return 'danger';
       return 'warning';
+    },
+    // 历史洞察（HistorySage 产出）：只有确有历史记录时才展示，避免新账号出现空卡片
+    historyInsight() {
+      const data = this.displayResult && this.displayResult.historyInsights;
+      return data && data.hasHistory ? data : null;
     },
     debateGroups() {
       if (!this.displayResult) return [];
@@ -609,56 +642,70 @@ export default {
           };
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       this.streamAbort = controller;
+      // 单场庭审最长 180 秒：超时主动中断，避免网络异常时页面无限转圈
+      let timeoutTimer = null;
+      if (controller) {
+        timeoutTimer = setTimeout(() => {
+          try { controller.abort(); } catch (e) { /* 忽略 */ }
+        }, 180000);
+      }
 
-      let resp;
       try {
-        resp = await fetch('/api/multi-agent/review-stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify(payload),
-          signal: controller ? controller.signal : undefined
-        });
-      } catch (error) {
-        console.warn('流式接口不可用，改用普通接口:', error.message);
-        return false;
-      }
+        let resp;
+        try {
+          resp = await fetch('/api/multi-agent/review-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify(payload),
+            signal: controller ? controller.signal : undefined
+          });
+        } catch (error) {
+          // 用户主动停止或超时中断：直接上抛，交由调用方处理，不再自动兜底重试
+          if (error && error.name === 'AbortError') throw error;
+          console.warn('流式接口不可用，改用普通接口:', error.message);
+          return false;
+        }
 
-      if (!resp.ok || !resp.body || !resp.body.getReader) {
-        console.warn('流式接口不可用（状态码 ' + resp.status + '），改用普通接口');
-        return false;
-      }
+        if (!resp.ok || !resp.body || !resp.body.getReader) {
+          console.warn('流式接口不可用（状态码 ' + resp.status + '），改用普通接口');
+          return false;
+        }
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let finished = false;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let finished = false;
 
-      while (!finished) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buffer.indexOf('\n')) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line) continue;
-          let evt;
-          try {
-            evt = JSON.parse(line);
-          } catch (e) {
-            continue;
-          }
-          if (evt.type === 'ping') continue;
-          pushEvent(evt);
-          if (evt.type === 'done') {
-            onDone(evt.data);
-            finished = true;
-          } else if (evt.type === 'error') {
-            throw new Error((evt.data && evt.data.message) || '庭审中断');
+        while (!finished) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line) continue;
+            let evt;
+            try {
+              evt = JSON.parse(line);
+            } catch (e) {
+              continue;
+            }
+            if (evt.type === 'ping') continue;
+            pushEvent(evt);
+            if (evt.type === 'done') {
+              onDone(evt.data);
+              finished = true;
+            } else if (evt.type === 'error') {
+              throw new Error((evt.data && evt.data.message) || '庭审中断');
+            }
           }
         }
+        return true;
+      } finally {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (this.streamAbort === controller) this.streamAbort = null;
       }
-      return true;
     },
 
     // 兼容路径：不支持流式时仍可完成审查（虚拟法庭会一次性补齐所有事件）
@@ -699,6 +746,10 @@ export default {
       });
       if (data.knowledge && data.knowledge.length) {
         events.push({ type: 'knowledge', data: { round: 2, items: data.knowledge } });
+      }
+      // 历史洞察：非流式回落时也要回放，保证与流式通道表现一致
+      if (data.historyInsights) {
+        events.push({ type: 'history-insights', data: data.historyInsights });
       }
       (data.stages || []).forEach((st) => {
         events.push({ type: 'summary', data: { agreed: st.agreed || [], residual: st.residual || [] } });
@@ -851,8 +902,13 @@ export default {
       const payload = { contractContent: task.content, contractName: task.name };
       const sink = this.makeTaskSink(task);
       const streamed = await this.runStreamReview(payload, sink);
-      if (!streamed) {
+      // 流正常结束但没收到 done（网关超时、连接被截断）时，用普通接口兜底一次
+      if (!streamed || !task.result) {
         await this.runPlainReview(payload, sink);
+      }
+      // 仍然没有结论就明确失败，不能把“空白结果”标记成已完成
+      if (!task.result) {
+        throw new Error('未获取到审查结论，请重试');
       }
       task.status = 'done';
     },
@@ -868,11 +924,23 @@ export default {
       }
 
       this.loading = true;
+      this.batchStopped = false;
       this.courtCollapsed = false;
       for (const task of valid) {
+        // 用户点击“停止批量”后不再开新庭，剩余任务保持待审查
+        if (this.batchStopped) {
+          if (task.status === 'running') task.status = 'pending';
+          continue;
+        }
         try {
           await this.executeTask(task);
         } catch (error) {
+          if (this.batchStopped) {
+            // 主动中止当前这一份：恢复为待审查，便于稍后重跑
+            task.status = 'pending';
+            task.error = '';
+            continue;
+          }
           console.error(`「${task.name}」庭审审查失败:`, error);
           task.status = 'error';
           task.error = error.message || '审查失败';
@@ -882,7 +950,24 @@ export default {
       this.clearTimers();
 
       const okCount = this.batchTasks.filter((t) => t.status === 'done').length;
-      ElMessage.success(`批量审查完成：成功 ${okCount} / ${this.batchTasks.length} 份`);
+      if (this.batchStopped) {
+        ElMessage.info(`批量审查已停止：已完成 ${okCount} / ${this.batchTasks.length} 份`);
+      } else {
+        ElMessage.success(`批量审查完成：成功 ${okCount} / ${this.batchTasks.length} 份`);
+      }
+    },
+
+    // 停止批量：中止当前这一份的流式请求，队列里剩余任务不再执行
+    stopBatch() {
+      this.batchStopped = true;
+      if (this.streamAbort) {
+        try {
+          this.streamAbort.abort();
+        } catch (error) {
+          console.warn('中止流式请求失败:', error);
+        }
+      }
+      ElMessage.info('已请求停止，当前这一份结束后不再继续');
     },
 
     // 重新审查：批量模式下只重审当前切换到的合同
@@ -1214,6 +1299,57 @@ export default {
 .verdict-actions {
   margin-top: 12px;
 }
+/* 历史洞察卡片：展示 HistorySage 的个性化提醒 */
+.history-insight {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f0f6ff 0%, #fbf6ec 100%);
+  border: 1px solid #dbe6f5;
+}
+.hi-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.hi-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #7c5cff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.hi-meta {
+  font-size: 12px;
+  color: #6b7a99;
+}
+.hi-message {
+  font-size: 13px;
+  color: #34405a;
+  margin-bottom: 8px;
+}
+.hi-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #4a5a78;
+  line-height: 1.9;
+}
+.hi-dist {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hi-dist-item {
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.hi-high { background: #fdecec; color: #c45656; }
+.hi-mid { background: #fdf6ec; color: #b88230; }
+.hi-low { background: #eef8f0; color: #3f8f5a; }
 .section-title {
   font-size: 14px;
   font-weight: 600;
