@@ -93,10 +93,17 @@ const PROMPTS = {
     '你是【JudgeVerdict｜终审法官】。你负责全链条复核并输出最终合同审查结论。要求：' +
     '1) 对两轮辩论中未达成一致的残余争议逐项说明处理方式；' +
     '2) 做“要素—结论”映射：合同要素 / 事实或条款依据 / 法律依据 / 结论；' +
-    '3) 评分0-100，分数越高风险越大；0-40为低风险、41-70为中风险、71-100为高风险，等级必须与分数一致；' +
-    '4) 每条风险必须给出条款位置、风险说明、法律依据、修改建议；' +
-    '5) 只输出JSON，不要markdown代码块。' +
-    'JSON格式：{"score":75,"level":"高","summary":"总体结论","findings":[{"clause":"条款位置","risk":"风险说明","level":"高|中|低","basis":"法律依据","suggestion":"修改建议"}],' +
+    '3) 按以下基准评分0-100（分数越高风险越大），等级必须由分数推导：' +
+    '0-40=低风险：条款完备、双方权利义务对等、违约责任与争议解决明确，最多只有轻微表述问题；' +
+    '41-70=中风险：存在模糊约定、个别必备条款缺失或权利义务略失衡，但合同整体可履行；' +
+    '71-100=高风险：违反法律强制性规定、明显权利义务失衡、关键条款缺失或存在重大履约/维权障碍；' +
+    '4) 只有合同现有条款本身存在实质缺陷、缺失法定必备要素或明显失衡时才计入 findings；不要把“可以进一步补充/完善某条款”当成风险发现，条款完备且对等的合同 findings 允许为空；' +
+    '5) 庭审记录中的争议焦点、残余争议与历史提醒只是参考材料，不代表合同必然存在风险；必须回到合同原文逐条核对，合同已有约定的不得声称“未约定/未明确”，也不得据此抬高风险等级；' +
+    '6) 总分必须与 findings 的严重程度一致：findings 为空或全部为“低”时 score≤40；最高等级为“中”时 score≤70；存在“高”级发现时 score≥71；' +
+    '7) 每条风险必须给出条款位置、风险说明、法律依据、修改建议；' +
+    '8) 只输出JSON，不要markdown代码块。' +
+    '参考：条款完备且对等的合同约20-35分（低），仅有少量模糊条款的合同约45-65分（中），存在明显违法或严重失衡条款的合同约80-95分（高）。' +
+    'JSON格式：{"score":55,"level":"中","summary":"总体结论","findings":[{"clause":"条款位置","risk":"风险说明","level":"高|中|低","basis":"法律依据","suggestion":"修改建议"}],' +
     '"factorConclusion":[{"factor":"合同要素","evidence":"条款或事实依据","basis":"法律依据","conclusion":"结论"}],' +
     '"residualDisputes":[{"title":"残余争议","handling":"处理方式"}],"historyWarnings":["用户历史高频风险提醒..."],"disclaimer":"免责说明"}'
   ,historySage:
@@ -471,35 +478,47 @@ async function finalVerdict(ctx, contractName, content, focuses, allEntries, res
     .join('\n');
 
   const historyBlock = (historyInsights && historyInsights.hasHistory)
-    ? `【用户历史洞察】基于该用户过往 ${historyInsights.totalRecords} 份合同的审查历史，发现以下模式：
+    ? `【用户历史洞察（仅供参考，不得据此提高当前合同评分）】基于该用户过往 ${historyInsights.totalRecords} 份合同的审查历史，发现以下模式：
 - 常见遗漏项：${(historyInsights.commonOmissions || []).slice(0, 5).join('；')}
 - 常见不足项：${(historyInsights.commonDeficiencies || []).slice(0, 5).join('；')}
 - 风险提醒：${(historyInsights.reminders || []).slice(0, 4).join('；')}
-请在裁决中特别关注以上历史高频问题是否在当前合同中存在。
+以上仅提示关注方向，是否存在风险必须回到合同原文核对。
 
 `
     : '';
 
   const userPrompt =
     `合同名称：${contractName || '未命名合同'}\n\n` +
-    `合同全文：\n${clip(content, 6000)}\n\n` +
+    `合同全文：\n${clip(content, 8000)}\n\n` +
+    `【庭审参考】以下为辩论过程与检索结果，仅作参考，不代表合同必然存在风险：\n` +
     `争议焦点：${focuses.map((f) => f.title).join('；')}\n` +
-    `残余争议：${residual.map((r) => r.title).join('；')}\n\n` +
-    `两轮庭审记录：\n${clip(transcript, 6000)}\n\n` +
+    `残余争议：${residual.map((r) => r.title).join('；')}\n` +
+    `两轮庭审记录：\n${clip(transcript, 3000)}\n\n` +
     `动态检索到的法律依据：\n${formatKnowledge(knowledge)}\n\n` +
     historyBlock +
-    '请完成全链条复核，输出最终审查结论。';
+    '请以合同原文为准逐条核对，只对合同现有条款确实存在的缺陷作出结论，输出最终审查结论。';
 
   const raw = await callRole(ctx, 'judgeVerdict', userPrompt, { maxTokens: 2400, temperature: 0.2, round: 3, focus: '终审裁决' });
   const parsed = parseJson(raw);
 
   if (parsed && typeof parsed.score !== 'undefined') {
-    const score = Math.max(0, Math.min(100, Number(parsed.score) || 60));
+    const rawScore = Math.max(0, Math.min(100, Number(parsed.score) || 60));
+    const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+    // 兜底校准：总分必须与条款发现的最严重等级一致，避免模型给分漂移
+    const severity = findings.reduce((max, f) => {
+      const level = String((f && f.level) || '').trim();
+      const value = level === '高' ? 3 : level === '低' ? 1 : 2;
+      return Math.max(max, value);
+    }, 0);
+    let score = rawScore;
+    if (severity <= 1) score = Math.min(score, 40);
+    else if (severity === 2) score = Math.min(score, 70);
+    else score = Math.max(score, 71);
     return {
       score,
       level: score <= 40 ? '低' : score <= 70 ? '中' : '高',
       summary: String(parsed.summary || ''),
-      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+      findings,
       factorConclusion: Array.isArray(parsed.factorConclusion) ? parsed.factorConclusion : [],
       residualDisputes: Array.isArray(parsed.residualDisputes) ? parsed.residualDisputes : [],
       disclaimer: String(parsed.disclaimer || '本结论由人工智能辅助生成，仅供合同审查参考，不构成正式法律意见。'),
