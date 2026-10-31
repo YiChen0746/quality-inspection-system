@@ -77,7 +77,7 @@ async function processOCR(imagePath) {
     authorization = Buffer.from(authorization).toString('base64');
 
     // 读取图片并转换为base64
-    const image = fs.readFileSync(imagePath, 'base64');
+    const image = Buffer.isBuffer(imagePath) ? imagePath.toString('base64') : fs.readFileSync(imagePath, 'base64');
 
     // 构建请求数据
     const submitData = {
@@ -139,17 +139,17 @@ async function processOCR(imagePath) {
 }
 
 // 图片文字识别统一入口：优先讯飞 OCR（已配置密钥时），否则回退到视觉大模型（如智谱 glm-4v-flash）
-async function extractImageText(imagePath) {
+async function extractImageText(imagePath, originalName) {
   if (OCR_CONFIG.APPId && OCR_CONFIG.APISecret && OCR_CONFIG.APIKey) {
     return processOCR(imagePath);
   }
-  return extractImageTextByVision(imagePath);
+  return extractImageTextByVision(imagePath, originalName);
 }
 
 // 视觉大模型 OCR 回退：用与主模型同平台的视觉模型提取合同照片文字
-async function extractImageTextByVision(imagePath) {
-  const image = fs.readFileSync(imagePath, 'base64');
-  const ext = path.extname(imagePath).toLowerCase();
+async function extractImageTextByVision(imagePath, originalName) {
+  const image = Buffer.isBuffer(imagePath) ? imagePath.toString('base64') : fs.readFileSync(imagePath, 'base64');
+  const ext = path.extname(originalName || (Buffer.isBuffer(imagePath) ? '' : imagePath)).toLowerCase();
   const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
   const visionModel = process.env.LLM_VISION_MODEL || 'glm-4v-flash';
 
@@ -515,10 +515,10 @@ router.post('/review', upload.single('contract_file'), async (req, res) => {
 // 批量导入/图片识别：提取单个文件（docx/txt/jpg/png）的文字内容，不做分析、不入库
 // 独立的 multer 实例：额外放行 .txt 纯文本
 const uploadExtract = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: function (req, file, cb) {
-    const allowedTypes = /jpeg|jpg|png|docx|txt/;
+    const allowedTypes = /^\.(jpeg|jpg|png|docx|txt)$/;
     const extOk = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     if (extOk) {
       return cb(null, true);
@@ -530,7 +530,6 @@ const uploadExtract = multer({
 });
 
 router.post('/extract-text', uploadExtract.single('file'), async (req, res) => {
-  const cleanup = () => { if (req.file) fs.unlink(req.file.path, () => {}); };
   try {
     if (!req.file) {
       return res.status(400).json({ err_code: 400, message: '请上传文件' });
@@ -538,16 +537,14 @@ router.post('/extract-text', uploadExtract.single('file'), async (req, res) => {
     const ext = path.extname(req.file.originalname).toLowerCase();
     let content = '';
     if (['.jpg', '.jpeg', '.png'].includes(ext)) {
-      content = await extractImageText(req.file.path);
+      content = await extractImageText(req.file.buffer, req.file.originalname);
     } else if (ext === '.docx') {
-      content = await extractDocxText(req.file.path);
+      content = await extractDocxText(req.file.buffer);
     } else if (ext === '.txt') {
-      content = fs.readFileSync(req.file.path, 'utf-8');
+      content = req.file.buffer.toString('utf-8').replace(/^\uFEFF/, '');
     } else {
-      cleanup();
       return res.status(400).json({ err_code: 400, message: '文字提取暂支持 DOCX、TXT、JPG、PNG 格式' });
     }
-    cleanup();
     if (!content || content.trim().length < 10) {
       return res.status(422).json({ err_code: 422, message: '未能从文件中识别出有效文字，请检查文件内容' });
     }
@@ -558,8 +555,7 @@ router.post('/extract-text', uploadExtract.single('file'), async (req, res) => {
     });
   } catch (error) {
     console.error('文字提取失败:', error);
-    cleanup();
-    res.status(500).json({ err_code: 500, message: '文字提取失败: ' + error.message });
+    res.status(500).json({ err_code: 500, message: '未能读取文件内容，请确认文件未损坏，或将正文复制到输入框后重试' });
   }
 });
 
@@ -688,10 +684,10 @@ router.get('/result/:id', async (req, res) => {
 // DOCX文本提取函数
 async function extractDocxText(docxPath) {
   try {
-    console.log('开始提取DOCX文件文本:', docxPath);
+    console.log('开始提取DOCX文件文本');
     
     // 使用mammoth直接提取文本内容
-    const result = await mammoth.extractRawText({ path: docxPath });
+    const result = await mammoth.extractRawText(Buffer.isBuffer(docxPath) ? { buffer: docxPath } : { path: docxPath });
     const textContent = result.value;
     
     console.log('DOCX文本提取成功，文本长度:', textContent.length);

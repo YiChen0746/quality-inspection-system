@@ -79,7 +79,11 @@ const isMultiAgent = computed(() => route.path === '/multi-agent')
 const visible = computed(() => !isHome.value)
 
 // ===== 位置与拖动 =====
-const pos = reactive({ x: window.innerWidth - 130, y: window.innerHeight - 180 })
+const pos = reactive({ x: window.innerWidth - 76, y: window.innerHeight - 76 })
+const clampPosition = () => {
+  pos.x = Math.min(Math.max(0, window.innerWidth - 68), Math.max(16, pos.x))
+  pos.y = Math.min(Math.max(0, window.innerHeight - 68), Math.max(88, pos.y))
+}
 let dragging = false
 let dragOffset = { x: 0, y: 0 }
 
@@ -271,11 +275,14 @@ const toggleSpeech = () => {
 }
 
 onMounted(() => {
+  clampPosition()
+  window.addEventListener('resize', clampPosition)
   initSpeech()
   rotateGreeting()
   greetTimer = setInterval(rotateGreeting, 8000)
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', clampPosition)
   if (recognition) recognition.abort()
   if (greetTimer) clearInterval(greetTimer)
 })

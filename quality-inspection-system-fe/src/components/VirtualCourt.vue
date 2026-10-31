@@ -8,11 +8,11 @@
         <span class="case-status" :class="statusClass">{{ statusText }}</span>
       </div>
       <div class="court-controls">
-        <el-button size="small" :disabled="finished" @click="togglePause">
+        <el-button size="small" :disabled="waiting || finished" @click="togglePause">
           {{ paused ? '继续' : '暂停' }}
         </el-button>
-        <el-button size="small" @click="cycleSpeed">{{ speed }}x</el-button>
-        <el-button size="small" :disabled="finished" @click="skipToVerdict">跳到结论</el-button>
+        <el-button size="small" :disabled="waiting" @click="cycleSpeed">{{ speed }}x</el-button>
+        <el-button size="small" :disabled="waiting || finished" @click="skipToVerdict">跳到结论</el-button>
         <span class="court-clock">{{ elapsedText }}</span>
       </div>
     </div>
@@ -29,7 +29,7 @@
         v-for="(s, i) in stages"
         :key="s.key"
         class="stage-step"
-        :class="{ done: stageIndex > i, active: stageIndex === i }"
+        :class="{ done: !waiting && stageIndex > i, active: !waiting && stageIndex === i }"
       >
         <span class="step-index">{{ i + 1 }}</span>
         <span class="step-text">{{ s.label }}</span>
@@ -113,7 +113,8 @@
             </div>
           </template>
           <div class="subtitle-idle" v-else>
-            <template v-if="finished">庭审已结束，可查看下方详细记录</template>
+            <template v-if="waiting">未开始，请等待</template>
+            <template v-else-if="finished">庭审已结束，完整发言可在「庭审记录」中查看</template>
             <template v-else-if="thinkingCount">双方正在准备发言…</template>
             <template v-else>等待下一个环节…</template>
           </div>
@@ -130,7 +131,7 @@
                 <span class="ev-title">{{ item.title }}</span>
               </div>
             </transition-group>
-            <div class="desk-empty" v-if="!visibleKnowledge.length">检索式命中后，法条会飞入此处</div>
+            <div class="desk-empty" v-if="!visibleKnowledge.length">{{ waiting ? '审查开始后，这里会展示检索依据' : '检索式命中后，法条会飞入此处' }}</div>
           </div>
           <div class="desk-history" v-if="historyRecords">
             <span class="dh-badge">历史洞察</span>
@@ -180,7 +181,7 @@
     </div>
 
     <!-- 终审裁决 -->
-    <div class="verdict-stage" v-if="showVerdict">
+    <div class="verdict-stage" v-if="showVerdict && showVerdictSummary">
       <div class="gavel" :class="{ strike: gavelStrike }">
         <div class="gavel-head"></div>
         <div class="gavel-handle"></div>
@@ -208,6 +209,8 @@ export default {
   name: 'VirtualCourt',
   props: {
     contractName: { type: String, default: '' },
+    showVerdictSummary: { type: Boolean, default: true },
+    waiting: { type: Boolean, default: false },
     // 后端事件组成的数组：每一项形如 { type, data }
     events: { type: Array, default: () => [] },
     // 后端是否已结束
@@ -284,11 +287,13 @@ export default {
       return 'gender-' + this.resolvedPartyBGender;
     },
     statusText() {
+      if (this.waiting) return '未开始';
       if (this.finished) return '已结案';
       if (this.streamDone) return '庭审结束';
       return '庭审进行中';
     },
     statusClass() {
+      if (this.waiting) return 'status-waiting';
       if (this.finished || this.streamDone) return 'status-done';
       return 'status-live';
     },
@@ -354,8 +359,8 @@ export default {
     }
   },
   mounted() {
-    this.clockTimer = setInterval(() => { this.elapsed += 1; }, 1000);
-    this.tickTimer = setInterval(() => { this.tick(); }, 45);
+    this.clockTimer = setInterval(() => { if (!this.waiting && !this.finished) this.elapsed += 1; }, 1000);
+    this.tickTimer = setInterval(() => { if (!this.waiting) this.tick(); }, 45);
   },
   beforeUnmount() {
     clearInterval(this.clockTimer);

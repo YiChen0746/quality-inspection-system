@@ -1,5 +1,9 @@
 <template>
   <div class="scrollable-container">
+    <div class="page-header">
+      <h1>合同分析</h1>
+      <p>集中查看合同数据、风险分布与到期提醒</p>
+    </div>
     <!-- 顶部统计卡 -->
     <div class="dashboard-container">
       <div class="card" v-for="card in cards" :key="card.title">

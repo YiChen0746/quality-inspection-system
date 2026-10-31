@@ -8,7 +8,10 @@ import {
   PieChart, 
   ChatDotRound, 
   View,
-  Cpu
+  Cpu,
+  Menu,
+  Close,
+  DocumentChecked
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus';
 import { getUserInfo, removeUserInfo, setUserInfo } from '@Setup/storage/user.js'
@@ -17,6 +20,20 @@ import AssistantWidget from '@/components/AssistantWidget.vue'
 
 const router = useRouter()
 const route = useRoute()
+const navOpen = ref(false)
+const isStandalone = computed(() => ['/login', '/email-verification'].includes(route.path))
+const pageName = computed(() => ({
+  '/knowledge_promotion': '首页',
+  '/contract-draft': '合同起草',
+  '/contract-review': '合同审查',
+  '/multi-agent': '深度审查',
+  '/intelligent_Q_A': '法务助手',
+  '/result_analysis': '合同分析',
+  '/quality_inspection': '合同模板',
+  '/editword': '文档编辑',
+  '/login': '账号登录',
+  '/email-verification': '邮箱验证'
+}[route.path] || '工作台'))
 
 // 页面文字大小调节：通过 zoom 缩放主内容区，偏好持久化到 localStorage
 const FONT_SCALE_KEY = 'qis-font-scale'
@@ -41,6 +58,7 @@ const isHome = computed(() => data.currentPathName === '/knowledge_promotion')
 
 // 监听路由变化，更新菜单激活状态
 watch(() => route.path, (newPath) => {
+  navOpen.value = false
   data.currentPathName = newPath
 }, { immediate: true })
 
@@ -92,10 +110,21 @@ const logoutHandler = async () => {
 </script>
 
 <template>
-  <header >
+  <div class="app-shell" @keydown.esc="navOpen = false" :class="{ 'app-home': isHome, 'app-workspace': !isHome && !isStandalone }">
     <div class="common-layout" >
       <el-container>
-        <el-header height="60px" >
+        <el-header height="72px" class="app-topbar">
+          <div class="header-left">
+            <button v-if="!isHome && !isStandalone" class="nav-toggle" :aria-expanded="navOpen" aria-controls="workspace-navigation" aria-label="打开或关闭功能菜单" @click="navOpen = !navOpen">
+              <el-icon><Close v-if="navOpen" /><Menu v-else /></el-icon>
+            </button>
+            <router-link to="/knowledge_promotion" class="brand" aria-label="约法三章 首页">
+              <span class="brand-mark"><el-icon><DocumentChecked /></el-icon></span>
+              <span class="brand-copy"><strong>约法三章</strong><small>多智驱动合同助手</small></span>
+            </router-link>
+            <span class="header-divider"></span>
+            <span class="current-page">{{ pageName }}</span>
+          </div>
           <!-- <h1 class="main-title">乳腺癌筛查的质检系统</h1> -->
           <div class="header-right">
             <!-- 文字大小调节 -->
@@ -107,13 +136,15 @@ const logoutHandler = async () => {
             <div class="user-info">
               <!-- <el-avatar :icon="UserFilled" /> -->
                <img src="./assets/images/tou.png" height="40px;" width="40px">
-              <el-link v-if="!data.isLogin" @click="goToLogin" :underline="false" style="color:white;">登录</el-link>
-              <el-text v-else class="logout" @click="logoutHandler" style="color:white;">退出</el-text>
+              <el-link v-if="!data.isLogin" @click="goToLogin" :underline="false" >登录</el-link>
+              <el-text v-else class="logout" @click="logoutHandler" >退出</el-text>
             </div>
           </div>
         </el-header>
-        <el-container>
-          <el-aside width="160px" v-show="!isHome" >
+        <el-container class="workspace-body">
+          <button v-if="navOpen && !isHome && !isStandalone" class="nav-backdrop" aria-label="关闭功能菜单" @click="navOpen = false"></button>
+          <el-aside id="workspace-navigation" width="224px" v-show="!isHome && !isStandalone" :class="{ 'is-open': navOpen }">
+            <div class="nav-caption">合同工作台</div>
             <el-menu
             :router="true"
             :default-active="data.currentPathName"
@@ -160,10 +191,11 @@ const logoutHandler = async () => {
                 <span>在线预览与编辑</span>
               </el-menu-item> -->
             </el-menu>
+            <div class="nav-footer"><span class="nav-footer-dot"></span><span>{{ data.isLogin ? '从起草到审查，一站完成' : '登录后使用完整功能' }}</span></div>
           </el-aside>
           <el-main>
             <el-scrollbar>
-              <div class="page-zoom" :style="{ zoom: fontScale }">
+              <div class="page-zoom" :style="{ zoom: fontScale, '--content-scale': fontScale }">
                 <router-view v-slot="{ Component }">
                   <keep-alive>
                     <component :is="Component" />
@@ -176,157 +208,70 @@ const logoutHandler = async () => {
       </el-container>
     </div>
     <AssistantWidget />
-  </header>
+  </div>
 
   
 </template>
 
 <style scoped>
-  .common-layout{
-    width: 100vw;
-    height: 100vh;
-    overflow: hidden;
-  }
-
-  .el-header{
-    padding: 0;
-    font-size: 30px;
-    font-weight: 700;
-    text-align: center;
-    line-height: 60px;
-    /* background-image: url("./assets/images/header-bg.jpg"); */
-    background-image: url("@/assets/header3.png");
-    background-size: 100% 700%;
-  }
-
-  .el-container{
-    width: 100%;
-    height: 100%;
-  }
-
-  .el-menu{
-    height: 100%;
-    padding-top: 20%;
-  }
-
-  .el-main{
-    padding: 0;
-    /* 明确高度，保证内部 el-scrollbar 总能正确计算滚动区域 */
-    height: calc(100vh - 60px);
-    overflow: hidden;
-  }
-
-  .header-right{
-    position: absolute;
-    right: 40px;
-    top: 0;
-    height: 60px;
-    display: flex;
-    align-items: center;
-    gap: 18px;
-  }
-  .user-info{
-    height: 60px;
-    width: 80px;
-    /* background-color: #fff; */
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .font-ctrl{
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .font-btn{
-    background: rgba(255, 255, 255, 0.15);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.45);
-    border-radius: 6px;
-    padding: 3px 9px;
-    font-size: 14px;
-    line-height: 1.4;
-    cursor: pointer;
-    transition: background 0.2s ease;
-  }
-  .font-btn:hover{
-    background: rgba(255, 255, 255, 0.32);
-  }
-  .font-btn-reset{
-    font-weight: 700;
-  }
-  .page-zoom{
-    min-height: 100%;
-  }
-  .main-title{
-    margin: 16px 0;
-    word-wrap: break-word;
-    font-size: 24px;
-    line-height: 1.22;
-    color: #000000;
-  }
-  .logout:hover{
-    cursor: pointer;
-  }
-  /* 侧边栏整体样式（统一深蓝主色系） */
-.el-aside {
-  background-color: var(--brand-primary);
-  box-shadow: 2px 0 8px rgba(14, 43, 87, 0.25);
+.common-layout { width: 100%; height: 100dvh; overflow: hidden; background: #f4f7fb; }
+.common-layout > .el-container { height: 100%; }
+.app-topbar { position: relative; z-index: 30; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; padding: 0 28px; background: #fff; border-bottom: 1px solid #e3e9f1; }
+.header-left, .header-right, .brand, .user-info { display: flex; align-items: center; }
+.header-left { gap: 24px; min-width: 0; }
+.brand { gap: 11px; color: #17355b; flex-shrink: 0; }
+.brand-mark { width: 40px; height: 42px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; color: #fff; background: #164c70; }
+.brand-copy { display: flex; flex-direction: column; gap: 2px; }
+.brand-copy strong { font-size: 20px; letter-spacing: 2px; line-height: 1.3; }
+.brand-copy small { font-size: 11px; font-weight: 400; color: #718196; letter-spacing: 1px; }
+.header-divider { height: 24px; width: 1px; background: #e1e7ef; }
+.current-page { font-size: 14px; color: #64748b; white-space: nowrap; }
+.header-right { gap: 24px; flex-shrink: 0; }
+.user-info { gap: 10px; font-size: 14px; }
+.user-info img { width: 34px; height: 34px; border-radius: 50%; }
+.user-info .el-link, .logout { color: #244866; font-weight: 600; cursor: pointer; }
+.font-ctrl { display: flex; gap: 2px; padding: 3px; border: 1px solid #e3e9f1; border-radius: 9px; background: #f8fafc; }
+.font-btn { background: transparent; color: #5b6b80; border-radius: 6px; padding: 5px 9px; font-size: 13px; line-height: 1.4; }
+.font-btn:hover { background: #e6edf5; color: #163d63; }
+.font-btn-reset { font-weight: 700; }
+.workspace-body { min-height: 0; min-width: 0; flex: 1; position: relative; }
+.el-aside { display: flex; flex-direction: column; background: #102d4b; border-right: 1px solid #183c5d; flex-shrink: 0; }
+.nav-caption { padding: 28px 24px 16px; color: #9bb4cb; font-size: 11px; letter-spacing: 2px; }
+.el-menu { background: transparent; border: 0; padding: 0 12px; flex: 1; overflow-y: auto; }
+.el-menu-item { color: #d1deec; font-size: 14px; font-weight: 500; padding: 0 14px !important; margin: 0 0 6px; height: 52px; border-radius: 9px; border: 1px solid transparent; transition: background .2s; }
+.el-menu-item .el-icon { margin-right: 12px; font-size: 19px; }
+.el-menu-item:hover:not(.is-disabled) { color: #fff; background: #1b405f; }
+.el-menu-item.is-active { background: #1d526e; border-color: #2e6a81; color: #fff; }
+.el-menu-item.is-disabled { opacity: .65; color: #b6c6d6; }
+.el-menu-item.menu-item--two-line { height: 66px; line-height: 1.4; }
+.menu-label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.menu-label-main { font-size: 14px; white-space: nowrap; }
+.menu-sub { font-size: 11px; font-weight: 400; color: #9ebacd; }
+.nav-footer { padding: 20px 18px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: #9bb4cb; border-top: 1px solid #24415a; }
+.nav-footer-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: #50c1bb; }
+.el-main { min-width: 0; padding: 0; overflow: hidden; }
+.el-main > .el-scrollbar { height: 100%; }
+.page-zoom { min-height: 100%; }
+.nav-toggle { display: none; padding: 9px; border-radius: 8px; background: #edf2f7; color: #244866; font-size: 20px; }
+.nav-backdrop { display: none; }
+button:focus-visible, .brand:focus-visible { outline: 3px solid #46b4c1; outline-offset: 3px; }
+@media (max-width: 760px) {
+  .app-topbar { padding: 0 16px; }
+  .header-left { gap: 12px; }
+  .header-right { gap: 12px; }
+  .header-divider, .current-page, .brand-copy small { display: none; }
+  .brand-copy strong { font-size: 17px; letter-spacing: 1px; }
+  .brand-mark { width: 32px; height: 34px; font-size: 21px; border-radius: 9px; }
+  .user-info img { display: none; }
+  .nav-toggle { display: flex; }
+  .el-aside { position: absolute; inset: 0 auto 0 0; z-index: 25; visibility: hidden; transform: translateX(-100%); transition: transform .2s ease; box-shadow: 8px 0 30px #102d4b22; }
+  .el-aside.is-open { visibility: visible; transform: translateX(0); }
+  .nav-backdrop { display: block; position: absolute; inset: 0; z-index: 24; background: #102d4b66; }
 }
-.el-menu {
-  background-color: transparent;
-  border-right: none;
-}
-.el-menu-item {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.85);
-  font-weight: 600;
-  padding: 14px 28px;
-  border-radius: 8px 0 0 8px;
-  margin-bottom: 6px;
-  cursor: pointer;
-  transition: all 0.22s ease;
-  letter-spacing: 1px;
-}
-.el-menu-item:hover:not(.is-disabled) {
-  background-color: var(--brand-primary-dark);
-  color: #fff;
-}
-.el-menu-item.is-active {
-  background-color: var(--brand-primary-dark) !important;
-  color: #fff !important;
-  border-left: 4px solid var(--brand-accent);
-  font-weight: 700;
-}
-.el-menu-item.is-disabled {
-  color: rgba(255, 255, 255, 0.35) !important;
-  cursor: not-allowed;
-}
-/* 两行菜单：主标题 + 副标题，避免侧边栏宽度不足导致文字被截断 */
-.el-menu-item.menu-item--two-line {
-  height: auto;
-  min-height: 62px;
-  line-height: 1.35;
-  padding-top: 9px;
-  padding-bottom: 9px;
-}
-.menu-label {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.menu-label-main {
-  font-size: 15px;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-.menu-sub {
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.4;
-  color: rgba(255, 255, 255, 0.62);
+@media (max-width: 440px) {
+  .app-topbar { padding: 0 10px; }
+  .header-left, .header-right { gap: 8px; }
+  .brand { gap: 7px; }
+  .font-btn { padding: 4px 6px; }
 }
 </style>
-
-       

@@ -275,7 +275,7 @@ onMounted(loadDashboardStats)
     <section class="hero">
       <div class="container1">
         <div class="hero-content">
-          <h1>智能<span class="highlight">合同法务平台</span>，全程护航合同风险</h1>
+          <h1>智能<span class="highlight">合同法务平台</span><br />全程护航合同风险</h1>
           <p>
             基于AI技术的一站式合同法务平台，覆盖合同起草、快速初筛、多智能体深度庭审审查与法务问答，快速识别合同风险点，降低法律纠纷概率。
           </p>
@@ -285,8 +285,8 @@ onMounted(loadDashboardStats)
           </div>
         </div>
         <img
-          src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=modern%20flat%20vector%20illustration%20of%20an%20AI%20powered%20legal%20contract%20review%20platform%2C%20deep%20blue%20and%20white%20color%20palette%2C%20a%20large%20contract%20document%20with%20checkmarks%2C%20magnifying%20glass%20scanning%20clauses%2C%20scales%20of%20justice%2C%20professional%20corporate%20style%2C%20clean%20background%2C%20soft%20shadows%2C%20high%20quality&image_size=landscape_16_9"
-          alt="AI 合同审查主题插画"
+          src="@/assets/images/contract-workspace.svg"
+          alt="合同条款定位与法条依据示意"
           class="hero-image"
         />
       </div>

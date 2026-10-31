@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="410" viewBox="0 0 560 410" fill="none">
+<rect x="30" y="28" width="490" height="350" rx="30" fill="#E1EDF3"/>
+<circle cx="445" cy="94" r="68" fill="#D0E8EA"/>
+<circle cx="89" cy="307" r="56" fill="#D1DFEE"/>
+<rect x="123" y="54" width="306" height="306" rx="17" fill="#173D5C" fill-opacity=".07"/>
+<rect x="110" y="42" width="306" height="306" rx="17" fill="white" stroke="#CBDDE7"/>
+<rect x="110" y="42" width="306" height="53" rx="17" fill="#163D5C"/>
+<path d="M110 77H416V95H110Z" fill="#163D5C"/>
+<circle cx="132" cy="68" r="4" fill="#86BAC9"/><circle cx="146" cy="68" r="4" fill="#86BAC9"/><circle cx="160" cy="68" r="4" fill="#86BAC9"/>
+<g font-family="Microsoft YaHei, PingFang SC, sans-serif">
+<text x="137" y="131" font-size="21" fill="#173D5C" font-weight="700">让每一份约定 更清楚</text>
+<rect x="137" y="151" width="165" height="7" rx="3.5" fill="#E3EBF1"/>
+<rect x="137" y="168" width="238" height="7" rx="3.5" fill="#E3EBF1"/>
+<rect x="137" y="195" width="251" height="42" rx="8" fill="#EDF7F8"/>
+<path d="M152 215L159 222L171 209" stroke="#268C91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="184" y="222" font-size="14" fill="#285F73">条款定位</text>
+<rect x="137" y="248" width="251" height="42" rx="8" fill="#F2F6FA"/>
+<path d="M152 268L159 275L171 262" stroke="#268C91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="184" y="275" font-size="14" fill="#285F73">法条依据</text>
+<rect x="260" y="301" width="217" height="65" rx="13" fill="white" stroke="#BFD8E0"/>
+<circle cx="291" cy="334" r="16" fill="#DDF2EF"/>
+<path d="M284 334L289 339L298 329" stroke="#268C91" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="319" y="331" font-size="14" fill="#173D5C" font-weight="700">把风险看在签字之前</text>
+<text x="319" y="350" font-size="11" fill="#73899A">起草 · 审查 · 解读</text>
+</g>
+<path d="M460 151V241M432 169H488M441 171L429 198H453L441 171ZM479 171L467 198H491L479 171ZM444 245H476" stroke="#28758B" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="460" cy="152" r="7" fill="#28758B"/>
+</svg>

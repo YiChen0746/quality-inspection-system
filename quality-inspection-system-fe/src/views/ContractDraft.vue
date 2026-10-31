@@ -10,6 +10,7 @@
       <!-- 左侧：合同模板选择 -->
       <div class="template-section">
         <h3>选择合同模板</h3>
+        <p v-if="!templates.length" class="template-empty">暂无可用模板，可以直接填写下方信息起草合同。</p>
         <div class="template-list">
           <div 
             v-for="template in templates" 
@@ -223,12 +224,6 @@
           <h3>起草指引</h3>
         </div>
 
-        <!-- 调试状态条（临时，排查用） -->
-        <div style="background:#fff7e6;border:1px solid #ffd591;border-radius:6px;padding:8px 10px;font-size:11px;color:#d46b08;line-height:1.6;word-break:break-all;">
-          <div>状态: {{ debugStatus || '未触发' }}</div>
-          <div v-if="debugDetail" style="margin-top:4px;white-space:pre-wrap;">{{ debugDetail }}</div>
-        </div>
-
         <!-- ============ 阶段流程条（始终显示，作为进度总览） ============ -->
         <div class="stage-steps">
           <div
@@ -348,7 +343,7 @@
         <div v-if="activeTab === 'preview'" class="preview-content">
           <div v-if="!currentContract" class="empty-state">
             <img src="../assets/images/pen1.png" alt="合同起草" class="empty-icon">
-            <p>请填写左侧表单信息生成合同</p>
+            <p>填写上方合同信息后，这里会显示生成的合同</p>
           </div>
           
           <div v-else class="contract-preview">

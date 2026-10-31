@@ -2,12 +2,24 @@
   <div class="multi-agent-page">
     <div class="page-header">
       <h1>多智能体合同审查</h1>
-      <p>借鉴 FMARLJP 框架：核心角色—元角色分层协作 · 辩论驱动的动态法条检索 · 全链条终审精炼</p>
+      <p>多方讨论合同争议，结合条款与法条依据，形成可追溯的审查建议</p>
     </div>
 
-    <div class="layout">
+    <div class="review-session-bar" v-if="hasSession">
+      <div class="review-session-copy">
+        <span class="session-state" :class="{ 'is-running': courtLoading }">{{ courtLoading ? '正在审查' : displayResult ? '审查完成' : '庭审记录' }}</span>
+        <strong>{{ courtContractName || '未命名合同' }}</strong>
+        <span class="session-hint">{{ displayResult ? '先查看风险与修改建议，需要时可展开庭审画面。' : courtLoading ? '合同已载入，正在展示庭审过程。' : '尚未获得结论，可展开合同输入检查后重试。' }}</span>
+      </div>
+      <div class="session-actions">
+        <el-button v-if="displayResult && courtEventsShown.length" size="small" @click="showCourt">回看庭审</el-button>
+        <el-button v-if="loading && batchTasks.length" size="small" type="danger" plain @click="stopBatch">停止批量</el-button>
+        <el-button size="small" :aria-expanded="inputExpanded" aria-controls="review-input" @click="inputExpanded = !inputExpanded">{{ inputExpanded ? '收起合同输入' : '查看或更换合同' }}</el-button>
+      </div>
+    </div>
+    <div class="layout" :class="{ 'layout--session': hasSession }">
       <!-- 左侧：输入与角色编排 -->
-      <div class="input-column">
+      <div id="review-input" class="input-column" v-show="!hasSession || inputExpanded">
         <el-card shadow="never" class="panel">
           <template #header>
             <div class="panel-title">审查输入</div>
@@ -74,7 +86,7 @@
             <div class="task-item" v-for="t in batchTasks" :key="t.id" :class="'st-' + t.status">
               <span class="task-dot"></span>
               <span class="task-name" :title="t.name">{{ t.name }}</span>
-              <span class="task-status">{{ statusText(t) }}</span>
+              <span class="task-status" :title="t.error || statusText(t)">{{ statusText(t) }}</span>
               <el-icon v-if="!loading && t.status !== 'running'" class="task-del" @click="removeTask(t.id)"><Close /></el-icon>
             </div>
             <div class="task-list-footer">
@@ -96,11 +108,11 @@
             <el-button
               type="primary"
               :loading="loading"
-              :disabled="extracting"
+              :disabled="extracting || (batchTasks.length > 0 && readyTaskCount === 0 && !loading)"
               @click="startReview"
             >
               <template v-if="batchTasks.length">
-                {{ loading ? '批量庭审审查中…' : `启动批量审查（${batchTasks.length} 份）` }}
+                {{ loading ? '批量庭审审查中…' : `启动批量审查（${readyTaskCount} 份）` }}
               </template>
               <template v-else>
                 {{ loading ? '多智能体审查中…' : '启动多智能体审查' }}
@@ -109,10 +121,9 @@
           </div>
         </el-card>
 
-        <el-card shadow="never" class="panel roles-panel">
-          <template #header>
-            <div class="panel-title">元角色编排（3 组 9 角色）</div>
-          </template>
+        <details class="panel roles-panel disclosure-panel">
+          <summary>参与审查的角色 <span>3 组 · 9 个角色</span></summary>
+          <div class="roles-body">
           <div class="role-group" v-for="group in roleGroups" :key="group.title">
             <div class="role-group-title">
               <span class="dot" :style="{ background: group.color }"></span>
@@ -125,9 +136,10 @@
             </div>
           </div>
           <div class="role-note">
-            每个元角色只承担单一职责，降低单角色认知负荷；检索式随辩论轮次迭代重写。
+            审判组归纳争议并形成结论，甲乙双方分别提出主张、核对证据与检索法条。
           </div>
-        </el-card>
+          </div>
+        </details>
       </div>
 
       <!-- 右侧：过程与结果 -->
@@ -148,35 +160,8 @@
           </el-button>
         </div>
 
-        <!-- 虚拟法庭：实时播放后端推送的庭审过程（结束后保留，可当回放看） -->
-        <el-card
-          shadow="never"
-          class="panel court-panel"
-          v-if="courtLoading || courtEventsShown.length"
-          v-show="!courtCollapsed"
-        >
-          <template #header>
-            <div class="panel-title court-panel-title">
-              <span>虚拟法庭 · 庭审实况{{ activeTask ? `：${activeTask.name}` : '' }}</span>
-              <el-button size="small" text @click="courtCollapsed = true">收起画面</el-button>
-            </div>
-          </template>
-          <VirtualCourt
-            :key="activeTask ? activeTask.id : 'single'"
-            :contract-name="courtContractName"
-            :events="courtEventsShown"
-            :stream-done="!courtLoading"
-            :party-a-gender="partyAGender"
-            :party-b-gender="partyBGender"
-          />
-        </el-card>
-        <div class="court-collapsed-bar" v-if="courtEventsShown.length && courtCollapsed">
-          <span>庭审画面已收起{{ activeTask ? `（${activeTask.name}）` : '' }}</span>
-          <el-button size="small" text type="primary" @click="courtCollapsed = false">展开庭审画面</el-button>
-        </div>
-
-        <el-card shadow="never" class="panel empty-panel" v-if="!courtLoading && !displayResult">
-          <el-empty description="输入合同后启动审查，这里会展示庭审全过程和终审结论" />
+        <el-card shadow="never" class="panel empty-panel" v-if="!courtLoading && !displayResult && !courtWaiting">
+          <el-empty :description="courtEventsShown.length ? '尚未获得审查结论，可展开合同输入后重试' : '输入合同后启动审查，这里会展示庭审全过程和终审结论'" />
         </el-card>
 
         <template v-if="displayResult">
@@ -203,6 +188,17 @@
                 </el-tag>
               </div>
               <div class="verdict-summary">{{ displayResult.verdict.summary || '—' }}</div>
+              <div class="verdict-actions">
+                <el-button size="small" @click="exportReport">导出审查报告(JSON)</el-button>
+                <el-button size="small" type="primary" plain @click="rerunActive">重新审查</el-button>
+              </div>
+              <div class="report-facts">
+                <span>发现 {{ displayResult.verdict.findings.length }} 条风险</span>
+                <span>检索依据 {{ displayResult.knowledge.length }} 条</span>
+                <span>用时 {{ (displayResult.stats.elapsedMs / 1000).toFixed(1) }} 秒</span>
+              </div>
+              <details class="execution-details">
+                <summary>查看本次审查信息</summary>
               <div class="verdict-meta">
                 <span>模型：{{ displayResult.model }}</span>
                 <span>大模型调用：{{ displayResult.stats.llmCalls }} 次（失败 {{ displayResult.stats.failedCalls }} 次）</span>
@@ -210,19 +206,62 @@
                 <span>耗时：{{ (displayResult.stats.elapsedMs / 1000).toFixed(1) }} 秒</span>
                 <span>检索法条：{{ displayResult.knowledge.length }} 条</span>
               </div>
-              <div class="verdict-actions">
-                <el-button size="small" @click="exportReport">导出审查报告(JSON)</el-button>
-                <el-button size="small" type="primary" plain @click="rerunActive">重新审查</el-button>
-              </div>
+              </details>
             </div>
           </el-card>
 
-          <el-card shadow="never" class="panel">
+          <el-card shadow="never" class="panel result-details">
             <el-tabs v-model="activeTab">
               <!-- 审查结论 -->
               <el-tab-pane label="审查结论" name="verdict">
+                <div class="section-title">风险条款（{{ displayResult.verdict.findings.length }}）</div>
+                <div v-if="displayResult.verdict.findings.length" class="risk-cards">
+                  <article class="risk-card" v-for="(finding, index) in displayResult.verdict.findings" :key="index">
+                    <div class="risk-card-header">
+                      <span class="risk-number">{{ String(index + 1).padStart(2, '0') }}</span>
+                      <h3>{{ finding.clause || '未标注条款位置' }}</h3>
+                      <el-tag :type="riskTagType(finding.level)" size="small">{{ finding.level }}风险</el-tag>
+                    </div>
+                    <div class="risk-card-body">
+                      <div class="risk-explanation"><h4>需要注意的问题</h4><p>{{ finding.risk || '暂无风险说明' }}</p></div>
+                      <div class="risk-suggestion"><h4>建议怎么修改</h4><p>{{ finding.suggestion || '暂无修改建议' }}</p></div>
+                    </div>
+                    <details class="risk-basis"><summary>查看法律依据</summary><p>{{ finding.basis || '未提供法律依据，请人工核对' }}</p></details>
+                  </article>
+                </div>
+                <el-empty v-else description="模型未返回结构化风险条款" :image-size="60" />
+
+                <details class="report-disclosure factor-details">
+                  <summary>查看条款与结论的对应依据</summary>
+                  <div class="disclosure-body">
+                <el-table
+                  v-if="displayResult.verdict.factorConclusion.length"
+                  :data="displayResult.verdict.factorConclusion"
+                  size="small"
+                  border
+                >
+                  <el-table-column prop="factor" label="合同要素" width="150" />
+                  <el-table-column prop="evidence" label="条款/事实依据" min-width="200" />
+                  <el-table-column prop="basis" label="法律依据" width="180" />
+                  <el-table-column prop="conclusion" label="结论" min-width="180" />
+                </el-table>
+                <el-empty v-else description="模型未返回要素映射" :image-size="60" />
+
+                  </div>
+                </details>
+                <div class="section-title" style="margin-top: 20px;">仍需确认的问题</div>
+                <div v-if="displayResult.verdict.residualDisputes.length" class="residual-list">
+                  <div class="residual-item" v-for="(r, i) in displayResult.verdict.residualDisputes" :key="i">
+                    <div class="residual-title">{{ r.title }}</div>
+                    <div class="residual-handling">{{ r.handling }}</div>
+                  </div>
+                </div>
+                <el-empty v-else description="无残余争议" :image-size="60" />
+
                 <!-- 历史洞察：HistorySage 的产出，展示为个性化风险提醒 -->
-                <div class="history-insight" v-if="historyInsight">
+                <details class="history-insight report-disclosure" v-if="historyInsight">
+                  <summary>历史经验提醒 <span>参考过往 {{ historyInsight.totalRecords }} 份合同</span></summary>
+                  <div class="disclosure-body">
                   <div class="hi-head">
                     <span class="hi-badge">历史洞察</span>
                     <span class="hi-meta">基于您过往 {{ historyInsight.totalRecords }} 份合同的审查记录</span>
@@ -236,50 +275,8 @@
                     <span class="hi-dist-item hi-mid">中风险 {{ historyInsight.riskLevelDist.mid }} 份</span>
                     <span class="hi-dist-item hi-low">低风险 {{ historyInsight.riskLevelDist.low }} 份</span>
                   </div>
-                </div>
-
-                <div class="section-title">风险条款（{{ displayResult.verdict.findings.length }}）</div>
-                <el-table
-                  v-if="displayResult.verdict.findings.length"
-                  :data="displayResult.verdict.findings"
-                  size="small"
-                  border
-                  class="verdict-table"
-                >
-                  <el-table-column prop="clause" label="条款位置" width="150" />
-                  <el-table-column prop="risk" label="风险说明" min-width="220" show-overflow-tooltip />
-                  <el-table-column label="等级" width="70" align="center">
-                    <template #default="{ row }">
-                      <el-tag :type="riskTagType(row.level)" size="small">{{ row.level }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="basis" label="法律依据" width="180" show-overflow-tooltip />
-                  <el-table-column prop="suggestion" label="修改建议" min-width="220" show-overflow-tooltip />
-                </el-table>
-                <el-empty v-else description="模型未返回结构化风险条款" :image-size="60" />
-
-                <div class="section-title" style="margin-top: 20px;">要素—结论映射</div>
-                <el-table
-                  v-if="displayResult.verdict.factorConclusion.length"
-                  :data="displayResult.verdict.factorConclusion"
-                  size="small"
-                  border
-                >
-                  <el-table-column prop="factor" label="合同要素" width="150" />
-                  <el-table-column prop="evidence" label="条款/事实依据" min-width="200" show-overflow-tooltip />
-                  <el-table-column prop="basis" label="法律依据" width="180" show-overflow-tooltip />
-                  <el-table-column prop="conclusion" label="结论" min-width="180" show-overflow-tooltip />
-                </el-table>
-                <el-empty v-else description="模型未返回要素映射" :image-size="60" />
-
-                <div class="section-title" style="margin-top: 20px;">残余争议处理</div>
-                <div v-if="displayResult.verdict.residualDisputes.length" class="residual-list">
-                  <div class="residual-item" v-for="(r, i) in displayResult.verdict.residualDisputes" :key="i">
-                    <div class="residual-title">{{ r.title }}</div>
-                    <div class="residual-handling">{{ r.handling }}</div>
                   </div>
-                </div>
-                <el-empty v-else description="无残余争议" :image-size="60" />
+                </details>
 
                 <div class="raw-verdict" v-if="displayResult.verdict.raw">
                   <div class="section-title">模型原始输出（降级展示）</div>
@@ -374,6 +371,36 @@
             </el-tabs>
           </el-card>
         </template>
+        <!-- 虚拟法庭：实时播放后端推送的庭审过程（结束后保留，可当回放看） -->
+        <el-card
+          shadow="never"
+          class="panel court-panel"
+          ref="courtPanel"
+          v-if="courtWaiting || courtLoading || courtEventsShown.length"
+          v-show="!courtCollapsed"
+        >
+          <template #header>
+            <div class="panel-title court-panel-title">
+              <span>虚拟法庭 · 庭审实况{{ activeTask ? `：${activeTask.name}` : '' }}</span>
+              <el-button size="small" text @click="courtCollapsed = true">收起画面</el-button>
+            </div>
+          </template>
+          <VirtualCourt
+            :key="activeTask ? activeTask.id : 'single'"
+            :contract-name="courtContractName"
+            :events="courtEventsShown"
+            :waiting="courtWaiting"
+            :stream-done="!courtLoading && !courtWaiting"
+            :show-verdict-summary="!displayResult"
+            :party-a-gender="partyAGender"
+            :party-b-gender="partyBGender"
+          />
+        </el-card>
+        <div class="court-collapsed-bar" v-if="(courtWaiting || courtEventsShown.length) && courtCollapsed">
+          <span>庭审过程与回放{{ activeTask ? `（${activeTask.name}）` : '' }}</span>
+          <el-button size="small" text type="primary" @click="courtCollapsed = false">查看庭审画面</el-button>
+        </div>
+
       </div>
     </div>
   </div>
@@ -406,6 +433,7 @@ export default {
       // 虚拟法庭：后端推送的庭审事件按到达顺序累积
       courtEvents: [],
       courtCollapsed: false,
+      inputExpanded: false,
       streamAbort: null,
       // 批量审查：每份合同一个独立庭审任务 { id, name, content, status, events, result, error }
       // status: extracting(识别中) → pending(待审查) → running(庭审中) → done(已完成) / error(失败)
@@ -445,6 +473,12 @@ export default {
     };
   },
   computed: {
+    readyTaskCount() {
+      return this.batchTasks.filter(t => ['pending', 'error'].includes(t.status) && t.content.trim().length >= 50).length;
+    },
+    hasSession() {
+      return this.courtLoading || !!this.displayResult || this.courtEventsShown.length > 0;
+    },
     // 当前选中的批量任务（无批量任务时为 null，走单合同模式）
     activeTask() {
       if (!this.activeTaskId) return null;
@@ -455,6 +489,9 @@ export default {
       return this.activeTask ? this.activeTask.events : this.courtEvents;
     },
     // 庭审是否进行中（驱动 stream-done 与加载态）
+    courtWaiting() {
+      return !!this.activeTask && ['pending', 'extracting'].includes(this.activeTask.status);
+    },
     courtLoading() {
       return this.activeTask ? this.activeTask.status === 'running' : this.loading;
     },
@@ -479,10 +516,10 @@ export default {
       return this.extractPartyGender(this.courtContractContent, 'B');
     },
     scoreColor() {
-      const s = this.displayResult?.verdict?.score || 0;
-      if (s <= 40) return '#2e9e5b';
-      if (s <= 70) return '#e6a23c';
-      return '#f56c6c';
+      const level = this.displayResult?.verdict?.level;
+      if (level === '低') return '#2e9e5b';
+      if (level === '高') return '#f56c6c';
+      return '#e6a23c';
     },
     levelTagType() {
       const level = this.displayResult?.verdict?.level;
@@ -510,6 +547,23 @@ export default {
       return groups;
     }
   },
+  watch: {
+    courtLoading(running) {
+      if (running) {
+        this.inputExpanded = false;
+        this.courtCollapsed = false;
+      } else if (!this.displayResult) {
+        this.inputExpanded = true;
+      }
+    },
+    displayResult(value, previous) {
+      if (value && value !== previous) {
+        this.inputExpanded = false;
+        this.courtCollapsed = true;
+        this.activeTab = 'verdict';
+      }
+    }
+  },
   mounted() {
     this.loadContracts();
     this.consumeDeepReviewPayload();
@@ -527,6 +581,13 @@ export default {
     }
   },
   methods: {
+    showCourt() {
+      this.courtCollapsed = false;
+      this.$nextTick(() => {
+        const panel = this.$refs.courtPanel;
+        if (panel && panel.$el) panel.$el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    },
     // 从合同正文中提取某一方（A=甲方/委托方，B=乙方/相对方）的性别
     // 识别模式：（男）（女）、性别：男/女、先生/女士/小姐、男/女 紧跟姓名
     extractPartyGender(content, side) {
@@ -816,6 +877,9 @@ export default {
 
     // 提取单个文件文字（docx/txt/图片OCR），调用后端 extract-text 接口
     async extractFileText(file) {
+      if (file.size > 10 * 1024 * 1024) throw new Error('文件超过 10MB，请缩小后重试');
+      // 纯文本直接在浏览器读取，不必上传或依赖服务器临时目录。
+      if (/\.txt$/i.test(file.name)) return (await file.text()).replace(/^\uFEFF/, '');
       const fd = new FormData();
       fd.append('file', file);
       const resp = await fetch('/api/contract-review/extract-text', {
@@ -825,9 +889,16 @@ export default {
       });
       const data = await resp.json();
       if (data.err_code !== 0) {
-        throw new Error(data.message || '文字提取失败');
+        throw new Error(this.readableImportError(data.message || '文字提取失败'));
       }
       return (data.data && data.data.content) || '';
+    },
+
+    readableImportError(message) {
+      if (/EPERM|EACCES|operation not permitted|permission denied/i.test(message)) {
+        return '文件读取被拒绝，请重新选择文件，或复制正文到输入框';
+      }
+      return message;
     },
 
     // 批量导入：每个文件形成独立庭审任务
@@ -836,14 +907,17 @@ export default {
       e.target.value = '';
       if (!files.length) return;
 
+      let imported = 0;
+      let failed = 0;
       this.extracting = true;
       for (const file of files) {
-        if (this.batchTasks.some((t) => t.name === file.name)) {
+        if (this.batchTasks.some((t) => (t.fileName || t.name) === file.name)) {
           ElMessage.warning(`「${file.name}」已在队列中`);
           continue;
         }
-        const task = {
+        let task = {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          fileName: file.name,
           name: file.name.replace(/\.[^.]+$/, '') || file.name,
           content: '',
           status: 'extracting',
@@ -852,22 +926,32 @@ export default {
           error: ''
         };
         this.batchTasks.push(task);
+        task = this.batchTasks[this.batchTasks.length - 1];
         if (!this.activeTaskId) this.activeTaskId = task.id;
         try {
           task.content = await this.extractFileText(file);
           if (task.content.trim().length < 50) {
             task.status = 'error';
             task.error = '识别出的正文不足 50 字，无法审查';
+            failed++;
           } else {
             task.status = 'pending';
+            imported++;
           }
         } catch (err) {
           task.status = 'error';
-          task.error = err.message || '文字提取失败';
+          task.error = this.readableImportError(err.message || '文字提取失败');
+          failed++;
         }
       }
       this.extracting = false;
-      ElMessage.success(`导入完成，队列共 ${this.batchTasks.length} 份合同，可启动批量审查`);
+      if (failed) {
+        const message = `本次成功读取 ${imported} 份，失败 ${failed} 份，请查看队列提示`;
+        if (imported) ElMessage.warning(message);
+        else ElMessage.error(message);
+      } else if (imported) {
+        ElMessage.success(`成功读取 ${imported} 份合同，可启动批量审查`);
+      }
     },
 
     // 识别图片文字：单张合同照片 → 文字填入左侧文本框
@@ -892,7 +976,7 @@ export default {
     },
 
     statusText(task) {
-      if (task.status === 'error') return task.error || '失败';
+      if (task.status === 'error') return this.readableImportError(task.error || '失败');
       return {
         extracting: '识别中…',
         pending: '待审查',
@@ -918,7 +1002,7 @@ export default {
     // 庭审切换：每份合同对应自己的虚拟法庭动画与终审结论
     switchTask(id) {
       this.activeTaskId = id;
-      this.courtCollapsed = false;
+      this.courtCollapsed = !!this.displayResult;
     },
 
     // 任务事件接收器：事件流与终审结论都写入任务自身

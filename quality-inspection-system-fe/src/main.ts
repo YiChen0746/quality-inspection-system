@@ -10,6 +10,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 // element 组件注册
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+import '@/assets/css/workspace.css'
 
 import App from './App.vue'
 import router from './router'
