@@ -13,6 +13,7 @@ import {
 import { ElMessage } from 'element-plus';
 import { getUserInfo, removeUserInfo, setUserInfo } from '@Setup/storage/user.js'
 import { logout } from '@Setup/request/index.ts';
+import AssistantWidget from '@/components/AssistantWidget.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -174,6 +175,7 @@ const logoutHandler = async () => {
         </el-container>
       </el-container>
     </div>
+    <AssistantWidget />
   </header>
 
   

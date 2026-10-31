@@ -223,40 +223,40 @@
           <h3>起草指引</h3>
         </div>
 
-        <!-- ============ 起草后阶段向导（问题清单 #19）：初稿生成后接管面板 ============ -->
-        <div v-if="draftStage !== 'filling' && stageInfo" class="stage-flow">
-          <div class="stage-steps">
-            <div
-              v-for="s in stageSteps"
-              :key="s.key"
-              class="stage-step"
-              :class="{ done: s.done, current: s.current }"
-            >
-              <span class="stage-dot">{{ s.done ? '✓' : (s.current ? '●' : '○') }}</span>
-              <span class="stage-label">{{ s.label }}</span>
-              <span v-if="!s.done" class="stage-line"></span>
-            </div>
-          </div>
+        <!-- 调试状态条（临时，排查用） -->
+        <div style="background:#fff7e6;border:1px solid #ffd591;border-radius:6px;padding:8px 10px;font-size:11px;color:#d46b08;line-height:1.6;word-break:break-all;">
+          <div>状态: {{ debugStatus || '未触发' }}</div>
+          <div v-if="debugDetail" style="margin-top:4px;white-space:pre-wrap;">{{ debugDetail }}</div>
+        </div>
 
-          <div class="stage-card" :class="draftStage">
-            <div class="stage-msg">{{ stageInfo.title }}</div>
-            <div class="stage-hint">{{ stageInfo.hint }}</div>
-            <button
-              v-if="stageInfo.action"
-              type="button"
-              class="stage-btn"
-              :disabled="isScoring || isRevising"
-              @click="stageInfo.action.fn"
-            >{{ stageInfo.action.text }}</button>
-          </div>
-
-          <div class="guidance-tip">
-            💡 修改左侧或表单内容后，重新生成/评分即可刷新阶段状态
+        <!-- ============ 阶段流程条（始终显示，作为进度总览） ============ -->
+        <div class="stage-steps">
+          <div
+            v-for="s in stageSteps"
+            :key="s.key"
+            class="stage-step"
+            :class="{ done: s.done, current: s.current }"
+          >
+            <span class="stage-dot">{{ s.done ? '✓' : (s.current ? '●' : '○') }}</span>
+            <span class="stage-label">{{ s.label }}</span>
+            <span v-if="!s.done" class="stage-line"></span>
           </div>
         </div>
 
-        <!-- ============ 填表中的字段指引（阶段向导接管后隐藏） ============ -->
-        <template v-else>
+        <!-- ============ 阶段行动卡片（仅在初稿生成后显示） ============ -->
+        <div v-if="draftStage !== 'filling' && stageInfo" class="stage-card" :class="draftStage">
+          <div class="stage-msg">{{ stageInfo.title }}</div>
+          <div class="stage-hint">{{ stageInfo.hint }}</div>
+          <button
+            v-if="stageInfo.action"
+            type="button"
+            class="stage-btn"
+            :disabled="isScoring || isRevising"
+            @click="stageInfo.action.fn"
+          >{{ stageInfo.action.text }}</button>
+        </div>
+
+        <!-- ============ 字段指引（始终显示，点击输入框即刷新） ============ -->
         <!-- 环节进度条（可点击跳转，必填项带 * 标记） -->
         <div class="guidance-progress">
           <div
@@ -325,7 +325,6 @@
         <div class="guidance-tip">
           💡 点击任一输入框可查看针对该字段的专属指引
         </div>
-        </template>
       </div>
 
       <!-- 右侧：合同预览和历史记录 -->
@@ -669,8 +668,14 @@ export default {
           formProgress: []
         }
       },
-      // debounce timers
+      // 调试状态（临时排查用）
+      debugStatus: '',
+      debugDetail: '',
+      // debounce timers & 请求竞态控制
       _guidanceTimer: null,
+      _guidanceAbort: null,
+      _guidanceSeq: 0,
+      _guidanceCache: {},
       _autocompleteTimer: null
     };
   },
@@ -1356,16 +1361,21 @@ export default {
     async fetchGuidance(fieldKey, debounced = false) {
       clearTimeout(this._guidanceTimer);
       const run = () => {
+        console.log('[指引] fetchGuidance 被调用, fieldKey=', fieldKey);
         this.guidance.currentKey = fieldKey;
+        this.debugStatus = `调用中: ${fieldKey}`;
 
         // 缓存命中（同字段 + 填写进度未变）直接复用，不发请求（问题清单 #11）
         const filledSig = Object.keys(this.contractForm).filter(k => String(this.contractForm[k] || '').trim()).join(',');
         const cacheKey = `${fieldKey}|${this.contractForm.contractType || ''}|${filledSig}`;
         this._guidanceCache = this._guidanceCache || {};
         if (this._guidanceCache[cacheKey]) {
+          console.log('[指引] 缓存命中, 直接复用');
           this.guidance.data = this._guidanceCache[cacheKey];
           this.guidance.error = '';
           this.guidance.loadingHint = false;
+          this.debugStatus = '缓存命中';
+          this.debugDetail = `currentStep=${this.guidance.data?.currentStep?.label || 'null'}, formProgress=${this.guidance.data?.formProgress?.length || 0}, legalBasis=${this.guidance.data?.legalBasis?.length || 0}`;
           return;
         }
 
@@ -1377,25 +1387,39 @@ export default {
 
         this.guidance.loadingHint = true;
         this.guidance.error = '';
+        const authHeaders = getAuthHeaders();
+        console.log('[指引] 发送请求, headers=', authHeaders, 'body=', { currentField: fieldKey, contractForm: this.contractForm });
+        this.debugStatus = '请求中...';
+        this.debugDetail = `field=${fieldKey}, hasToken=${!!authHeaders.Authorization}`;
         fetch('/api/contract_guidance', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({ currentField: fieldKey, contractForm: this.contractForm }),
           signal: ctrl.signal
-        }).then(r => r.json())
+        }).then(r => {
+          console.log('[指引] 收到响应, status=', r.status);
+          return r.json();
+        })
           .then(data => {
+            console.log('[指引] 响应数据, err_code=', data.err_code, 'data=', data.data);
+            this.debugStatus = `响应: err_code=${data.err_code}`;
             if (seq !== this._guidanceSeq) return; // 过期响应直接丢弃
             if (data.err_code === 0) {
               this.guidance.data = data.data;
               this._guidanceCache[cacheKey] = data.data;
+              this.debugDetail = `currentStep=${data.data?.currentStep?.label || 'null'}, formProgress=${data.data?.formProgress?.length || 0}, legalBasis=${data.data?.legalBasis?.length || 0}, hint=${(data.data?.hint || '').slice(0,40)}`;
             } else {
               this.guidance.error = data.message || '指引加载失败';
+              this.debugDetail = `错误: ${data.message}`;
             }
           })
           .catch(err => {
+            console.error('[指引] 请求失败:', err.name, err.message);
             if (err.name === 'AbortError') return; // 被新请求取消，静默
             if (seq === this._guidanceSeq) {
               this.guidance.error = '指引加载失败，请重新点击输入框重试'; // 问题清单 #15：不再静默
+              this.debugStatus = '请求失败';
+              this.debugDetail = `${err.name}: ${err.message}`;
             }
           })
           .finally(() => {
@@ -1748,6 +1772,7 @@ export default {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .section-tabs {
@@ -1777,6 +1802,8 @@ export default {
   flex: 1;
   padding: 20px;
   min-height: 500px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .empty-state {
@@ -1799,6 +1826,7 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .preview-header {
@@ -1808,11 +1836,18 @@ export default {
   margin-bottom: 15px;
   padding-bottom: 10px;
   border-bottom: 1px solid #e9ecef;
+  min-width: 0;
+  gap: 8px;
 }
 
 .preview-header h4 {
   margin: 0;
   color: #2c3e50;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
 }
 
 .preview-actions {
@@ -1839,6 +1874,8 @@ export default {
 
 .contract-content {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .contract-textarea {
@@ -1851,6 +1888,10 @@ export default {
   line-height: 1.6;
   resize: none;
   font-family: 'Microsoft YaHei', sans-serif;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .history-list {
@@ -1916,6 +1957,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 .score-value {
   font-size: 20px;
@@ -1925,11 +1967,14 @@ export default {
   font-size: 12px;
   color: #909399;
   margin-bottom: 4px;
+  word-break: break-word;
 }
 .score-detail {
   margin-top: 8px;
   font-size: 12px;
   color: #606266;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .score-detail .detail-title {
   font-weight: 600;
@@ -2040,13 +2085,16 @@ export default {
 .stage-steps {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 10px 10px;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
+  overflow: hidden;
 }
-.stage-step { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.stage-step { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; min-width: 0; }
 .stage-dot {
   width: 20px;
   height: 20px;
@@ -2065,7 +2113,7 @@ export default {
   0%, 100% { box-shadow: 0 0 0 0 rgba(64,158,255,0.35); }
   50% { box-shadow: 0 0 0 5px rgba(64,158,255,0); }
 }
-.stage-label { font-size: 11px; color: #606266; white-space: nowrap; }
+.stage-label { font-size: 11px; color: #606266; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56px; }
 .stage-step.current .stage-label { color: #409eff; font-weight: 700; }
 .stage-line { width: 10px; height: 1px; background: #d4d7de; display: inline-block; margin: 0 2px; }
 .stage-card {
@@ -2078,8 +2126,8 @@ export default {
 .stage-card.score { background: #ecf5ff; border: 1px solid #b3d8ff; }
 .stage-card.revise { background: #fdf6ec; border: 1px solid #f5dab1; }
 .stage-card.export { background: #f0f9eb; border: 1px solid #b3e19d; }
-.stage-msg { font-size: 14px; font-weight: 700; color: #303133; }
-.stage-hint { font-size: 12px; color: #606266; line-height: 1.7; }
+.stage-msg { font-size: 14px; font-weight: 700; color: #303133; word-break: break-word; overflow-wrap: break-word; }
+.stage-hint { font-size: 12px; color: #606266; line-height: 1.7; word-break: break-word; overflow-wrap: break-word; }
 .stage-btn {
   align-self: flex-start;
   margin-top: 2px;
@@ -2131,6 +2179,8 @@ export default {
   color: #b88230;
   line-height: 1.6;
   white-space: pre-line;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* 响应式设计：1366 笔记本也走桌面布局，更窄才堆叠 */
@@ -2169,6 +2219,7 @@ export default {
   height: fit-content;
   position: sticky;
   top: 20px;
+  overflow: hidden;
 }
 .guidance-header {
   display: flex;
@@ -2229,7 +2280,7 @@ export default {
 }
 .card-sub { font-size: 14px; font-weight: 600; color: #303133; margin-bottom: 4px; }
 .next-step-sub { color: #67c23a; }
-.card-hint { font-size: 13px; color: #606266; line-height: 1.6; }
+.card-hint { font-size: 13px; color: #606266; line-height: 1.6; word-break: break-word; overflow-wrap: break-word; }
 .card-hint.muted { color: #909399; font-size: 12px; font-style: italic; }
 .loading-dot { color: #409eff; font-size: 12px; }
 
@@ -2241,10 +2292,10 @@ export default {
   border-left: 3px solid #e6a23c;
   border-radius: 4px;
 }
-.law-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
-.law-name { font-weight: 600; color: #e6a23c; font-size: 13px; }
-.law-article { font-size: 11px; color: #909399; }
-.law-content { font-size: 12px; color: #606266; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.law-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; gap: 6px; }
+.law-name { font-weight: 600; color: #e6a23c; font-size: 13px; word-break: break-word; }
+.law-article { font-size: 11px; color: #909399; white-space: nowrap; }
+.law-content { font-size: 12px; color: #606266; line-height: 1.6; word-break: break-word; overflow-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .guidance-tip {
   font-size: 12px;
   color: #909399;
@@ -2252,6 +2303,8 @@ export default {
   padding: 8px 10px;
   border-radius: 6px;
   text-align: center;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* ============ 聚焦态 & 补全建议 ============ */

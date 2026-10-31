@@ -166,6 +166,8 @@
             :contract-name="courtContractName"
             :events="courtEventsShown"
             :stream-done="!courtLoading"
+            :party-a-gender="partyAGender"
+            :party-b-gender="partyBGender"
           />
         </el-card>
         <div class="court-collapsed-bar" v-if="courtEventsShown.length && courtCollapsed">
@@ -464,6 +466,18 @@ export default {
       if (this.activeTask) return this.activeTask.name;
       return this.form.contractName || (this.result && this.result.contractName) || '';
     },
+    // 庭审用的合同正文（用于提取甲乙双方性别）
+    courtContractContent() {
+      if (this.activeTask) return this.activeTask.content || '';
+      return this.form.contractContent || (this.result && this.result.contractContent) || '';
+    },
+    // 从合同正文提取甲方性别：识别（男）/（女）、性别：男/女、先生/女士等
+    partyAGender() {
+      return this.extractPartyGender(this.courtContractContent, 'A');
+    },
+    partyBGender() {
+      return this.extractPartyGender(this.courtContractContent, 'B');
+    },
     scoreColor() {
       const s = this.displayResult?.verdict?.score || 0;
       if (s <= 40) return '#2e9e5b';
@@ -513,7 +527,34 @@ export default {
     }
   },
   methods: {
-    // 接收快速初筛页面“转深度审查”带过来的正文
+    // 从合同正文中提取某一方（A=甲方/委托方，B=乙方/相对方）的性别
+    // 识别模式：（男）（女）、性别：男/女、先生/女士/小姐、男/女 紧跟姓名
+    extractPartyGender(content, side) {
+      const text = String(content || '');
+      if (!text) return '';
+      // 先锁定该方所在的段落：甲方/委托方 或 乙方/相对方/受托方
+      const sideLabels = side === 'A'
+        ? ['甲方', '委托方', '发包方', '出租方', '卖方', '原告', '借款人']
+        : ['乙方', '相对方', '承包方', '承租方', '买方', '被告', '出借人', '受托方'];
+      // 在全文中找该方标签后的一段文字（取标签后 80 字内）
+      let segment = '';
+      for (const label of sideLabels) {
+        const idx = text.indexOf(label);
+        if (idx >= 0) {
+          segment = text.slice(idx, idx + 80);
+          break;
+        }
+      }
+      if (!segment) return '';
+      // 明确性别标注
+      if (/（\s*男\s*）|\(\s*男\s*\)|性别[：:\s]*男/.test(segment)) return 'male';
+      if (/（\s*女\s*）|\(\s*女\s*\)|性别[：:\s]*女/.test(segment)) return 'female';
+      // 称谓推断
+      if (/先生/.test(segment)) return 'male';
+      if (/女士|小姐|夫人/.test(segment)) return 'female';
+      return '';
+    },
+    // 接收快速初筛页面"转深度审查"带过来的正文
     consumeDeepReviewPayload() {
       try {
         const raw = sessionStorage.getItem('deep-review-payload');

@@ -53,6 +53,7 @@
             <div class="actor-bubble" v-if="thinking[role.key]"><b></b><b></b><b></b></div>
             <div class="actor-talk" v-else-if="speakerOf(role.key) === 'typing'"><i></i><i></i><i></i></div>
             <div class="actor-head">
+              <i class="hair"></i>
               <i class="eye eye-l"></i>
               <i class="eye eye-r"></i>
               <i class="mouth"></i>
@@ -76,17 +77,18 @@
         >
           <div
             class="actor actor-a"
-            :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+            :class="[{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }, partyAGenderClass]"
             :style="{ animationDelay: (partyARoles.indexOf(role) * 0.4) + 's' }"
           >
             <div class="actor-bubble" v-if="thinking[role.key]"><b></b><b></b><b></b></div>
             <div class="actor-talk" v-else-if="speakerOf(role.key) === 'typing'"><i></i><i></i><i></i></div>
             <div class="actor-head">
+              <i class="hair"></i>
               <i class="eye eye-l"></i>
               <i class="eye eye-r"></i>
               <i class="mouth"></i>
             </div>
-            <div class="actor-body"><i class="collar"></i></div>
+            <div class="actor-body"><i class="collar"></i><i class="tie"></i></div>
           </div>
           <div class="seat-label">{{ role.label }}</div>
         </div>
@@ -151,17 +153,18 @@
         >
           <div
             class="actor actor-b"
-            :class="{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }"
+            :class="[{ speaking: speakerOf(role.key) === 'typing', thinking: thinking[role.key] }, partyBGenderClass]"
             :style="{ animationDelay: (partyBRoles.indexOf(role) * 0.4) + 's' }"
           >
             <div class="actor-bubble" v-if="thinking[role.key]"><b></b><b></b><b></b></div>
             <div class="actor-talk" v-else-if="speakerOf(role.key) === 'typing'"><i></i><i></i><i></i></div>
             <div class="actor-head">
+              <i class="hair"></i>
               <i class="eye eye-l"></i>
               <i class="eye eye-r"></i>
               <i class="mouth"></i>
             </div>
-            <div class="actor-body"><i class="collar"></i></div>
+            <div class="actor-body"><i class="collar"></i><i class="tie"></i></div>
           </div>
           <div class="seat-label">{{ role.label }}</div>
         </div>
@@ -208,7 +211,10 @@ export default {
     // 后端事件组成的数组：每一项形如 { type, data }
     events: { type: Array, default: () => [] },
     // 后端是否已结束
-    streamDone: { type: Boolean, default: false }
+    streamDone: { type: Boolean, default: false },
+    // 甲方/乙方性别：'male' | 'female' | ''（空表示合同未注明，需随机）
+    partyAGender: { type: String, default: '' },
+    partyBGender: { type: String, default: '' }
   },
   data() {
     return {
@@ -262,6 +268,21 @@ export default {
     };
   },
   computed: {
+    // 甲方性别：合同注明则用之，否则按合同名哈希稳定随机
+    resolvedPartyAGender() {
+      if (this.partyAGender === 'male' || this.partyAGender === 'female') return this.partyAGender;
+      return this.hashRand(this.contractName + 'A') < 0.5 ? 'male' : 'female';
+    },
+    resolvedPartyBGender() {
+      if (this.partyBGender === 'male' || this.partyBGender === 'female') return this.partyBGender;
+      return this.hashRand(this.contractName + 'B') < 0.5 ? 'male' : 'female';
+    },
+    partyAGenderClass() {
+      return 'gender-' + this.resolvedPartyAGender;
+    },
+    partyBGenderClass() {
+      return 'gender-' + this.resolvedPartyBGender;
+    },
     statusText() {
       if (this.finished) return '已结案';
       if (this.streamDone) return '庭审结束';
@@ -342,6 +363,16 @@ export default {
     if (this.holdTimer) clearTimeout(this.holdTimer);
   },
   methods: {
+    // 基于字符串的稳定哈希，返回 [0,1)，用于合同未注明性别时的稳定随机
+    hashRand(str) {
+      let h = 2166136261;
+      const s = String(str || '');
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return ((h >>> 0) % 1000) / 1000;
+    },
     // 重新开庭：清空上一轮庭审的全部播放状态
     resetShow() {
       this.ops = [];
@@ -774,13 +805,26 @@ export default {
   position: relative;
   z-index: 2;
 }
+/* 腮红：贴近卡通形象 */
+.actor-head::before,
+.actor-head::after {
+  content: '';
+  position: absolute;
+  top: 16px;
+  width: 5px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 150, 150, 0.5);
+}
+.actor-head::before { left: 3px; }
+.actor-head::after { right: 3px; }
 .eye {
   position: absolute;
   top: 11px;
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: #4a3f35;
+  background: #2c2c2c;
 }
 .eye-l { left: 7px; }
 .eye-r { right: 7px; }
@@ -789,9 +833,9 @@ export default {
   bottom: 5px;
   left: 50%;
   transform: translateX(-50%);
-  width: 8px;
+  width: 7px;
   height: 3px;
-  border-radius: 1px 1px 6px 6px;
+  border-radius: 0 0 6px 6px;
   background: #c9704f;
 }
 
@@ -815,9 +859,96 @@ export default {
   border-right: 6px solid transparent;
   border-top: 7px solid rgba(255, 255, 255, 0.9);
 }
-.actor-judge .actor-body { background: linear-gradient(180deg, #a89ae8, #8679d2); }
-.actor-a .actor-body { background: linear-gradient(180deg, #82adf3, #5f92e6); }
-.actor-b .actor-body { background: linear-gradient(180deg, #f4ba82, #ec9f58); }
+/* 领带：甲方蓝 / 乙方橙 */
+.tie {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 9px solid #2c5cbf;
+  z-index: 1;
+}
+.actor-b .tie { border-top-color: #e07a2c; }
+
+/* ===== 头发 ===== */
+.hair {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+/* 法官：灰白卷发，两侧鬓角 */
+.actor-judge .hair {
+  width: 29px;
+  height: 13px;
+  border-radius: 16px 16px 6px 6px;
+  background: linear-gradient(180deg, #f0f0f0 0%, #d0d0d0 100%);
+}
+.actor-judge .hair::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: -1px;
+  width: 5px;
+  height: 8px;
+  border-radius: 3px;
+  background: inherit;
+}
+.actor-judge .hair::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: -1px;
+  width: 5px;
+  height: 8px;
+  border-radius: 3px;
+  background: inherit;
+}
+/* 甲方/乙方：黑发分头，简洁利落 */
+.actor-a .hair,
+.actor-b .hair {
+  width: 28px;
+  height: 12px;
+  border-radius: 14px 14px 4px 4px;
+  background: linear-gradient(180deg, #3a3a3a 0%, #1a1a1a 100%);
+}
+/* 斜分头线 */
+.actor-a .hair::before,
+.actor-b .hair::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 6px;
+  width: 1px;
+  height: 9px;
+  background: rgba(255,255,255,0.18);
+  transform: rotate(18deg);
+}
+/* 男性：短发 */
+.actor-a.gender-male .hair,
+.actor-b.gender-male .hair {
+  width: 27px;
+  height: 11px;
+}
+/* 女性：头发稍长 */
+.actor-a.gender-female .hair,
+.actor-b.gender-female .hair {
+  width: 29px;
+  height: 13px;
+  border-radius: 15px 15px 5px 5px;
+}
+
+/* 法官：黑色法袍 + 白色衣领 */
+.actor-judge .actor-body { background: linear-gradient(180deg, #3a3a3a, #1a1a1a); }
+.actor-judge .collar { border-top-color: rgba(255, 255, 255, 0.95); }
+/* 律师：黑色西装 + 白衬衫 + 彩色领带 */
+.actor-a .actor-body { background: linear-gradient(180deg, #2c2c2c, #1a1a1a); }
+.actor-b .actor-body { background: linear-gradient(180deg, #2c2c2c, #1a1a1a); }
 
 /* 发言状态：身体摇摆 + 头部点头 + 嘴巴开合 + 光晕 */
 .actor.speaking { animation: actorTalk 0.5s ease-in-out infinite; }
@@ -835,7 +966,7 @@ export default {
   0%, 100% { height: 3px; width: 8px; }
   50% { height: 7px; width: 7px; }
 }
-.actor.speaking .actor-body { box-shadow: 0 6px 16px rgba(110, 130, 200, 0.3); }
+.actor.speaking .actor-body { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25); }
 .actor.speaking ~ .seat-label,
 .seat:has(.actor.speaking) .seat-label { color: #33415c; font-weight: 600; }
 
