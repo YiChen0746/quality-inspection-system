@@ -93,10 +93,10 @@ const PROMPTS = {
     '你是【JudgeVerdict｜终审法官】。你负责全链条复核并输出最终合同审查结论。要求：' +
     '1) 对两轮辩论中未达成一致的残余争议逐项说明处理方式；' +
     '2) 做“要素—结论”映射：合同要素 / 事实或条款依据 / 法律依据 / 结论；' +
-    '3) 评分0-100，分数越高风险越大；等级为低/中/高；' +
+    '3) 评分0-100，分数越高风险越大；0-40为低风险、41-70为中风险、71-100为高风险，等级必须与分数一致；' +
     '4) 每条风险必须给出条款位置、风险说明、法律依据、修改建议；' +
     '5) 只输出JSON，不要markdown代码块。' +
-    'JSON格式：{"score":75,"level":"中","summary":"总体结论","findings":[{"clause":"条款位置","risk":"风险说明","level":"高|中|低","basis":"法律依据","suggestion":"修改建议"}],' +
+    'JSON格式：{"score":75,"level":"高","summary":"总体结论","findings":[{"clause":"条款位置","risk":"风险说明","level":"高|中|低","basis":"法律依据","suggestion":"修改建议"}],' +
     '"factorConclusion":[{"factor":"合同要素","evidence":"条款或事实依据","basis":"法律依据","conclusion":"结论"}],' +
     '"residualDisputes":[{"title":"残余争议","handling":"处理方式"}],"historyWarnings":["用户历史高频风险提醒..."],"disclaimer":"免责说明"}'
   ,historySage:
@@ -497,13 +497,7 @@ async function finalVerdict(ctx, contractName, content, focuses, allEntries, res
     const score = Math.max(0, Math.min(100, Number(parsed.score) || 60));
     return {
       score,
-      level: ['低', '中', '高'].includes(parsed.level)
-        ? parsed.level
-        : score <= 40
-          ? '低'
-          : score <= 70
-            ? '中'
-            : '高',
+      level: score <= 40 ? '低' : score <= 70 ? '中' : '高',
       summary: String(parsed.summary || ''),
       findings: Array.isArray(parsed.findings) ? parsed.findings : [],
       factorConclusion: Array.isArray(parsed.factorConclusion) ? parsed.factorConclusion : [],
@@ -708,6 +702,15 @@ async function handleReview(req, res, emit) {
           core_clauses: JSON.stringify(verdict.factorConclusion || []),
           user_id: req.user?.id || null
         });
+        // 同步整体评分到合同表，供首页统计与合同健康度使用
+        try {
+          await Contract.update(
+            { risk_score: Number(verdict.score) || 0, risk_level: verdict.level || null },
+            { where: { id: effectiveContractId, user_id: req.user?.id || null } }
+          );
+        } catch (scoreError) {
+          console.warn('回写合同评分失败（不影响本次审查）:', scoreError.message);
+        }
       } catch (dbError) {
         console.warn('多智能体审查结果入库失败（不影响本次审查）:', dbError.message);
       }
@@ -861,6 +864,15 @@ async function summarizeHistoryForUser(userId) {
     const levelDist = { low: 0, mid: 0, high: 0 };
     results.forEach((r) => {
       const text = String(r.risk_clauses || '');
+      // 优先使用终审结论的整体等级，保证与详情页一致
+      const verdictMatch = text.match(/风险评分[：:]\s*\d+\s*（(低|中|高)）/);
+      if (verdictMatch) {
+        if (verdictMatch[1] === '高') levelDist.high += 1;
+        else if (verdictMatch[1] === '中') levelDist.mid += 1;
+        else levelDist.low += 1;
+        return;
+      }
+      // 旧记录没有整体等级时，退回按条款标签的最严重者统计
       const tags = text.match(/\[(高|中|低)\]/g) || [];
       if (!tags.length) return;
       if (tags.indexOf('[高]') >= 0) levelDist.high += 1;
@@ -887,9 +899,9 @@ async function summarizeHistoryForUser(userId) {
       reminders: parsed.reminders || [],
       frequentRiskTypes,
       riskLevelDist: {
-        low: Number(dist.low) || levelDist.low || 0,
-        mid: Number(dist.mid) || levelDist.mid || 0,
-        high: Number(dist.high) || levelDist.high || 0
+        low: levelDist.low,
+        mid: levelDist.mid,
+        high: levelDist.high
       },
       // 本次历史洞察实际消耗的大模型调用次数，供页面统计使用
       calls: sageCtx.calls
@@ -934,9 +946,18 @@ async function loadUserResults(userId, limit = 100) {
   });
 }
 
-// 解析单份合同的风险等级（取最高）
+// 解析单份合同的风险等级（优先整体等级，旧记录回退到条款最高级）
 function contractRiskLevel(riskText) {
-  const tags = String(riskText || '').match(/\[(高|中|低)\]/g) || [];
+  const text = String(riskText || '');
+  // 优先使用终审结论的整体等级，保证概览、历史洞察与详情页口径一致
+  const verdictMatch = text.match(/风险评分[：:]\s*\d+\s*（(低|中|高)）/);
+  if (verdictMatch) {
+    if (verdictMatch[1] === '高') return 'high';
+    if (verdictMatch[1] === '中') return 'mid';
+    return 'low';
+  }
+  // 旧记录没有整体等级时，退回按条款标签的最严重者统计
+  const tags = text.match(/\[(高|中|低)\]/g) || [];
   if (!tags.length) return 'none';
   if (tags.indexOf('[高]') >= 0) return 'high';
   if (tags.indexOf('[中]') >= 0) return 'mid';
